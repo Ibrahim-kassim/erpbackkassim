@@ -1,0 +1,247 @@
+{
+    "info": {
+        "_postman_id": "erp-coa-collection",
+        "name": "ERP Chart of Accounts",
+        "description": "Collection to test the Chart of Accounts module",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "1. Create Root Asset (Cash)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"code\": \"1000\",\n    \"name\": \"Cash & Equivalents\",\n    \"type\": \"ASSET\",\n    \"isPosting\": false,\n    \"description\": \"Main cash header\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "2. Create Child Account (Petty Cash)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"code\": \"1010\",\n    \"name\": \"Petty Cash\",\n    \"type\": \"ASSET\",\n    \"isPosting\": true,\n    \"parentId\": \"{{PARENT_ID}}\",\n    \"description\": \"Office petty cash\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts"
+                    ]
+                },
+                "description": "Replace {{PARENT_ID}} with the _id from request #1 response"
+            },
+            "response": []
+        },
+        {
+            "name": "3. Get Account Tree",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts/tree",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts",
+                        "tree"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "4. List Accounts (Filtered)",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts?type=ASSET&isPosting=true",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts"
+                    ],
+                    "query": [
+                        {
+                            "key": "type",
+                            "value": "ASSET"
+                        },
+                        {
+                            "key": "isPosting",
+                            "value": "true"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "5. Get Posting Accounts (Dropdown)",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts/posting",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts",
+                        "posting"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "6. Update Account (Rename)",
+            "request": {
+                "method": "PATCH",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"name\": \"Petty Cash Office 1\",\n    \"description\": \"Updated description\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts/{{ACCOUNT_ID}}",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts",
+                        "{{ACCOUNT_ID}}"
+                    ]
+                },
+                "description": "Replace {{ACCOUNT_ID}} with the target account ID"
+            },
+            "response": []
+        },
+        {
+            "name": "7. Move Account (Change Parent)",
+            "request": {
+                "method": "PATCH",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"parentId\": \"{{NEW_PARENT_ID}}\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts/{{ACCOUNT_ID}}",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts",
+                        "{{ACCOUNT_ID}}"
+                    ]
+                },
+                "description": "Replace {{NEW_PARENT_ID}} and {{ACCOUNT_ID}}"
+            },
+            "response": []
+        },
+        {
+            "name": "8. Deactivate Account",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:5000/api/v1/accounts/{{ACCOUNT_ID}}/deactivate",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "5000",
+                    "path": [
+                        "api",
+                        "v1",
+                        "accounts",
+                        "{{ACCOUNT_ID}}",
+                        "deactivate"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "variable": [
+        {
+            "key": "PARENT_ID",
+            "value": "REPLACE_WITH_ID"
+        },
+        {
+            "key": "ACCOUNT_ID",
+            "value": "REPLACE_WITH_ID"
+        },
+        {
+            "key": "NEW_PARENT_ID",
+            "value": "REPLACE_WITH_ID"
+        }
+    ]
+}
