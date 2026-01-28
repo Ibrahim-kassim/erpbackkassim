@@ -42,6 +42,8 @@ export interface IJournalEntry extends Document {
     entryType: EntryType;
     postingDate: Date;
     fiscalPeriodId: Types.ObjectId;
+    fiscalYearId: Types.ObjectId;
+    fiscalPeriodLabelSnapshot?: string;
     description?: string;
     reference?: string;
 
@@ -80,6 +82,8 @@ const JournalEntrySchema: Schema = new Schema({
     entryType: { type: String, enum: Object.values(EntryType), default: EntryType.JOURNAL_ENTRY },
     postingDate: { type: Date, required: true },
     fiscalPeriodId: { type: Schema.Types.ObjectId, required: true, ref: 'FiscalPeriod' },
+    fiscalYearId: { type: Schema.Types.ObjectId, required: true, ref: 'FiscalCalendar' },
+    fiscalPeriodLabelSnapshot: { type: String },
 
     description: { type: String },
     reference: { type: String },
@@ -107,6 +111,7 @@ const JournalEntrySchema: Schema = new Schema({
 JournalEntrySchema.index({ tenantId: 1, entryNo: 1 }, { unique: true });
 JournalEntrySchema.index({ tenantId: 1, postingDate: 1 });
 JournalEntrySchema.index({ tenantId: 1, fiscalPeriodId: 1 });
+JournalEntrySchema.index({ tenantId: 1, fiscalYearId: 1 });
 JournalEntrySchema.index({ tenantId: 1, sourceType: 1, sourceId: 1 }, {
     unique: true,
     partialFilterExpression: { status: EntryStatus.POSTED, sourceType: { $exists: true }, sourceId: { $exists: true } }

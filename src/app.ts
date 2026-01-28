@@ -5,6 +5,8 @@ import { errorHandler } from './middleware/errorHandler';
 import coaRoutes from './routes/chartOfAccount.route';
 import jeRoutes from './routes/journalEntry.route';
 import fiscalRoutes from './routes/fiscal.route';
+import reportsRoutes from './routes/reports.route';
+import adminRoutes from './routes/admin.route';
 
 const app = express();
 
@@ -18,7 +20,9 @@ app.use(auth);
 // Routes
 app.use('/api/v1/accounts', coaRoutes);
 app.use('/api/v1/journal-entries', jeRoutes);
-app.use('/api/v1/fiscal-periods', fiscalRoutes);
+app.use('/api/v1/fiscal', fiscalRoutes);
+app.use('/api/v1/reports', reportsRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 // Error Handling
 app.use(errorHandler);

@@ -40,3 +40,8 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
     await service.deleteDraft(req.params.id, req.tenantId!);
     res.status(204).send();
 });
+
+export const validateFiscal = asyncHandler(async (req: Request, res: Response) => {
+    const data = await service.validateEntryFiscal(req.params.id, req.tenantId!);
+    res.status(200).json({ data });
+});

@@ -8,6 +8,7 @@ router.post('/', controller.create);
 router.get('/:id', controller.getById);
 router.patch('/:id', controller.update);
 router.post('/:id/post', controller.post);
+router.get('/:id/validate-fiscal', controller.validateFiscal); // Debug endpoint
 router.post('/:id/reverse', controller.reverse);
 router.delete('/:id', controller.remove);
 

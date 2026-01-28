@@ -16,6 +16,8 @@ class ServiceError extends Error {
     }
 }
 
+import { fiscalService } from './fiscal.service';
+
 // Helper: Get next sequence
 const getNextEntryNo = async (tenantId: string): Promise<string> => {
     const ret = await Counter.findOneAndUpdate(
@@ -27,24 +29,12 @@ const getNextEntryNo = async (tenantId: string): Promise<string> => {
     return `JE-${num}`;
 };
 
-// Helper: Validate Period
-const validateFiscalPeriod = async (tenantId: string, periodId: string, date: Date) => {
-    const period = await FiscalPeriod.findOne({ _id: periodId, tenantId });
-    if (!period) throw new ServiceError('Fiscal period not found', 'NOT_FOUND');
-
-    if (period.status !== FiscalPeriodStatus.OPEN) {
-        throw new ServiceError(`Fiscal period is ${period.status}`, 'FORBIDDEN');
-    }
-
-    const d = new Date(date);
-    if (d < period.startDate || d > period.endDate) {
-        throw new ServiceError('Posting date is outside the fiscal period range', 'VALIDATION_ERROR');
-    }
-    return period;
-};
+// Removed local validateFiscalPeriod in favor of fiscalService.resolveDate logic inside post/create logic
+// where we need robust Period + Year + Status checks.
 
 // Helper: Validate Lines & Snapshot Accounts
 const validateAndSnapshotLines = async (tenantId: string, lines: any[]) => {
+    // ... existing implementation
     const accountIds = lines.map(l => l.accountId);
     const accounts = await ChartOfAccount.find({
         _id: { $in: accountIds },
@@ -94,6 +84,12 @@ export const createDraft = async (dto: CreateDraftDTO, tenantId: string) => {
     const { lines, debitTotal, creditTotal } = await validateAndSnapshotLines(tenantId, dto.lines);
     const entryNo = await getNextEntryNo(tenantId);
 
+    // Initial check for period valid if provided, but strict check is on POST
+    // We allow DRAFT to have any period/date initially? 
+    // Usually yes, but let's keep it clean.
+    // If user provided fiscalPeriodId, we accept it for now.
+    // However, schema requires it.
+
     const entry = new JournalEntry({
         tenantId,
         entryNo,
@@ -101,6 +97,8 @@ export const createDraft = async (dto: CreateDraftDTO, tenantId: string) => {
         entryType: dto.entryType || 'Journal Entry',
         postingDate: dto.postingDate,
         fiscalPeriodId: dto.fiscalPeriodId,
+        // fiscalYearId set on post usually, or now?
+        // Let's set it if we can resolve it, else wait for post.
         description: dto.description,
         reference: dto.reference,
         sourceType: dto.sourceType,
@@ -109,6 +107,31 @@ export const createDraft = async (dto: CreateDraftDTO, tenantId: string) => {
         lines,
         totals: { debitTotal, creditTotal }
     });
+
+    // Attempt to resolve to set initial Year ID if possible (optional for Draft)
+    try {
+        const resolved = await fiscalService.resolveDate(tenantId, new Date(dto.postingDate));
+        if (resolved) {
+            entry.fiscalYearId = resolved.fiscalYearId;
+            entry.fiscalPeriodId = resolved.periodId as any; // Auto-correct period if needed
+        }
+    } catch (e) {
+        // Ignore for draft
+    }
+
+    // Temporary hack if fiscalYearId required by validation but not resolved:
+    // We made it required in Schema. So we MUST resolve it or fail.
+    // Let's relax schema or require valid date.
+    // Ideally DRAFT should be flexible. But our schema has required=true.
+    // So we invoke resolveDate.
+
+    if (!entry.fiscalYearId) {
+        // Try resolve again and fail if cannot
+        const resolved = await fiscalService.resolveDate(tenantId, new Date(dto.postingDate));
+        if (!resolved) throw new ServiceError('No fiscal year found for this date', 'VALIDATION_ERROR');
+        entry.fiscalYearId = resolved.fiscalYearId;
+        entry.fiscalPeriodId = resolved.periodId as any;
+    }
 
     return await entry.save();
 };
@@ -129,9 +152,19 @@ export const updateDraft = async (id: string, dto: UpdateDraftDTO, tenantId: str
 
     if (dto.postingDate) entry.postingDate = dto.postingDate;
     if (dto.entryType) entry.entryType = dto.entryType as any;
-    if (dto.fiscalPeriodId) entry.fiscalPeriodId = new Types.ObjectId(dto.fiscalPeriodId);
+    // We will re-resolve period/year on save or post
+
     if (dto.description !== undefined) entry.description = dto.description;
     if (dto.reference !== undefined) entry.reference = dto.reference;
+
+    // If date changed, re-resolve year
+    if (dto.postingDate) {
+        const resolved = await fiscalService.resolveDate(tenantId, new Date(dto.postingDate));
+        if (resolved) {
+            entry.fiscalYearId = resolved.fiscalYearId;
+            entry.fiscalPeriodId = resolved.periodId as any;
+        }
+    }
 
     return await entry.save();
 };
@@ -140,13 +173,25 @@ export const postEntry = async (id: string, tenantId: string) => {
     const entry = await JournalEntry.findOne({ _id: id, tenantId });
     if (!entry) throw new ServiceError('Entry not found', 'NOT_FOUND');
 
-    if (entry.status === EntryStatus.POSTED) return entry; // Idempotent-ish
+    if (entry.status === EntryStatus.POSTED) return entry;
     if (entry.status === EntryStatus.REVERSED) throw new ServiceError('Cannot post a reversed entry', 'CONFLICT');
 
-    // 1. Validate Fiscal Period
-    await validateFiscalPeriod(tenantId, entry.fiscalPeriodId.toString(), entry.postingDate);
+    // 1. Resolve and Validate Fiscal Period Integrity
+    const resolved = await fiscalService.resolveDate(tenantId, entry.postingDate);
+    if (!resolved) {
+        throw new ServiceError(`No fiscal period found for date ${entry.postingDate.toISOString().split('T')[0]}`, 'VALIDATION_ERROR');
+    }
 
-    // 2. Lock check for source (if exists) -> handled by Partial Unique Index in DB, but good to check friendly error
+    if (resolved.status !== 'OPEN') {
+        throw new ServiceError(`Fiscal period ${resolved.code} is ${resolved.status}. Cannot post.`, 'FORBIDDEN');
+    }
+
+    // Update with authoritative Source of Truth
+    entry.fiscalYearId = resolved.fiscalYearId;
+    entry.fiscalPeriodId = resolved.periodId as any;
+    entry.fiscalPeriodLabelSnapshot = resolved.label;
+
+    // 2. Lock check for source
     if (entry.sourceType && entry.sourceId) {
         const existing = await JournalEntry.findOne({
             tenantId,
@@ -158,7 +203,7 @@ export const postEntry = async (id: string, tenantId: string) => {
         if (existing) throw new ServiceError('A posted journal entry already exists for this source document', 'CONFLICT');
     }
 
-    // 3. Re-validate accounts (they might have changed since draft)
+    // 3. Re-validate accounts
     const lineAccountIds = entry.lines.map(l => l.accountId);
     const accounts = await ChartOfAccount.find({ _id: { $in: lineAccountIds }, tenantId });
     const accMap = new Map(accounts.map(a => [a._id.toString(), a]));
@@ -188,7 +233,22 @@ export const reverseEntry = async (id: string, dto: ReverseEntryDTO, tenantId: s
     }
 
     // Validate new period
-    await validateFiscalPeriod(tenantId, dto.fiscalPeriodId, dto.reversalDate);
+    // Validate new period
+    const resolved = await fiscalService.resolveDate(tenantId, dto.reversalDate);
+    if (!resolved) {
+        throw new ServiceError('No fiscal period found for reversal date', 'VALIDATION_ERROR');
+    }
+    if (resolved.status !== 'OPEN') {
+        throw new ServiceError(`Fiscal period ${resolved.code} is ${resolved.status}. Cannot post reversal.`, 'FORBIDDEN');
+    }
+    // Also check if dto.fiscalPeriodId matches resolved?
+    // If user passed a specific period ID, we should check it matches resolved to be safe, 
+    // or just trust resolveDate. 
+    // Spec says "valid fiscal period".
+    if (dto.fiscalPeriodId && resolved.periodId.toString() !== dto.fiscalPeriodId) {
+        // mismatch warning or error?
+        // Let's rely on resolveDate as truth.
+    }
 
     // Create Reversal Lines (flip debit/credit)
     const reversedLines = original.lines.map(l => ({
@@ -207,7 +267,9 @@ export const reverseEntry = async (id: string, dto: ReverseEntryDTO, tenantId: s
         entryNo: newEntryNo,
         status: EntryStatus.POSTED, // Direct post? or Draft? Requirement says 'status=POSTED directly'
         postingDate: dto.reversalDate,
-        fiscalPeriodId: dto.fiscalPeriodId,
+        fiscalPeriodId: resolved.periodId,
+        fiscalYearId: resolved.fiscalYearId,
+        fiscalPeriodLabelSnapshot: resolved.label,
         description: `Reversal of ${original.entryNo} - ${original.description || ''}`.substring(0, 500),
         reference: dto.reason || `Reversal of ${original.entryNo}`,
         sourceType: 'REVERSAL',
@@ -273,6 +335,31 @@ export const listEntries = async (query: any, tenantId: string) => {
     ]);
 
     return { data, meta: { total, page, limit, pages: Math.ceil(total / limit) } };
+};
+
+export const validateEntryFiscal = async (id: string, tenantId: string) => {
+    const entry = await JournalEntry.findOne({ _id: id, tenantId });
+    if (!entry) throw new ServiceError('Entry not found', 'NOT_FOUND');
+
+    try {
+        const resolved = await fiscalService.resolveDate(tenantId, entry.postingDate);
+        if (!resolved) {
+            return {
+                allowedToPost: false,
+                reason: 'No fiscal period matches posting date',
+                postingDate: entry.postingDate
+            };
+        }
+
+        return {
+            allowedToPost: resolved.status === 'OPEN',
+            reason: resolved.status === 'OPEN' ? null : `Period is ${resolved.status}`,
+            period: resolved,
+            postingDate: entry.postingDate
+        };
+    } catch (e: any) {
+        return { allowedToPost: false, reason: e.message, postingDate: entry.postingDate };
+    }
 };
 
 export const getEntryById = async (id: string, tenantId: string) => {
