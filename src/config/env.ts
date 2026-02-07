@@ -7,6 +7,6 @@ dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
 export const config = {
     port: process.env.PORT || 5000,
-    mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/erp_coa',
+    mongoUri: process.env.MONGO_URI || 'mongodb+srv://ibrahimkassim975_db_user:siUGhXg7RrnZXDuY@cluster0.adf3quy.mongodb.net/',
     env: process.env.NODE_ENV || 'development',
 };

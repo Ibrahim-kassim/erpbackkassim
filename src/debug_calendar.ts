@@ -6,7 +6,7 @@ dotenv.config();
 
 const run = async () => {
     try {
-        const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/erp_coa';
+        const uri = process.env.MONGO_URI || 'mongodb+srv://ibrahimkassim975_db_user:siUGhXg7RrnZXDuY@cluster0.adf3quy.mongodb.net/';
         console.log('Connecting to:', uri);
         await mongoose.connect(uri);
         console.log('Connected to DB');
