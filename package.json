@@ -4,11 +4,10 @@
     "description": "",
     "main": "dist/server.js",
     "scripts": {
-        "start": "node dist/server.js",
-        "dev": "nodemon src/server.ts",
+        "dev": "ts-node-dev --respawn src/server.ts",
         "build": "tsc",
-        "seed": "ts-node src/seed.ts",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "start": "node dist/server.js",
+        "seed": "ts-node src/seed.ts"
     },
     "keywords": [],
     "author": "",
@@ -27,6 +26,7 @@
         "@types/node": "^20.8.9",
         "nodemon": "^3.0.1",
         "ts-node": "^10.9.1",
+        "ts-node-dev": "^2.0.0",
         "typescript": "^5.2.2"
     }
 }
