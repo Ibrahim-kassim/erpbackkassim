@@ -33,6 +33,11 @@ const seed = async () => {
             code: '2000', name: 'AP Control', type: AccountType.LIABILITY, normalBalance: NormalBalance.CREDIT,
             level: 0, path: 'LIABILITY/2000', isPosting: true, isActive: true, systemControlled: true, tenantId
         },
+        // EQUITY
+        {
+            code: '3999', name: 'Opening Balance Equity', type: AccountType.EQUITY, normalBalance: NormalBalance.CREDIT,
+            level: 0, path: 'EQUITY/3999', isPosting: true, isActive: true, systemControlled: true, tenantId
+        },
         // REVENUE
         {
             code: '4000', name: 'Sales Revenue', type: AccountType.REVENUE, normalBalance: NormalBalance.CREDIT,

@@ -7,6 +7,7 @@ import jeRoutes from './routes/journalEntry.route';
 import fiscalRoutes from './routes/fiscal.route';
 import reportsRoutes from './routes/reports.route';
 import adminRoutes from './routes/admin.route';
+import businessPartnerRoutes from './routes/businessPartner.route';
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use('/api/v1/journal-entries', jeRoutes);
 app.use('/api/v1/fiscal', fiscalRoutes);
 app.use('/api/v1/reports', reportsRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/business-partners', businessPartnerRoutes);
 
 // Error Handling
 app.use(errorHandler);
