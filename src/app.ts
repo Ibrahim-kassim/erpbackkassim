@@ -9,6 +9,8 @@ import reportsRoutes from './routes/reports.route';
 import adminRoutes from './routes/admin.route';
 import businessPartnerRoutes from './routes/businessPartner.route';
 import inventoryRoutes from './routes/inventory.route';
+import rfqRoutes from './routes/rfq.route';
+import quotationRoutes from './routes/quotation.route';
 
 const app = express();
 
@@ -27,6 +29,8 @@ app.use('/api/v1/reports', reportsRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/business-partners', businessPartnerRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
+app.use('/api/v1/rfq', rfqRoutes);
+app.use('/api/v1/quotations', quotationRoutes);
 
 // Error Handling
 app.use(errorHandler);
