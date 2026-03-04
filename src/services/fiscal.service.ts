@@ -114,17 +114,10 @@ export class FiscalService {
         const period = doc.periods[periodIndex];
 
         // Validations
-        if (period.status === 'CLOSED') throw new Error('Cannot change status of CLOSED period');
-        if (period.status === status) return doc; // No change
-
-        // Single Open Policy
-        if (status === 'OPEN') {
-            doc.periods.forEach(p => {
-                if (p.status === 'OPEN' && p._id.toString() !== periodId) {
-                    p.status = 'LOCKED';
-                }
-            });
+        if (period.status === 'CLOSED' && status === 'LOCKED') {
+            throw new Error('Cannot lock a CLOSED period. Reopen it first.');
         }
+        if (period.status === status) return doc; // No change
 
         period.status = status;
         await doc.save();
