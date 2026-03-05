@@ -25,7 +25,7 @@ const RFQItemSchema = new Schema({
     description: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1 },
     uomId: { type: Schema.Types.ObjectId, ref: 'Uom', required: true }
-}, { _id: false });
+});
 
 const RFQSchema: Schema = new Schema({
     tenantId: { type: String, required: true, index: true },

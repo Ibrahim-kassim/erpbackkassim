@@ -23,10 +23,13 @@ export const createQuotation = async (dto: CreateQuotationDTO, tenantId: string)
         throw new ServiceError('Vendor is not invited to this RFQ', 'VALIDATION_ERROR');
     }
 
-    // Check if quotation already exists for this vendor
+    // Upsert: update if already exists, create if not
     const existing = await Quotation.findOne({ rfqId: dto.rfqId, vendorId: dto.vendorId, tenantId, isDeleted: false });
     if (existing) {
-        throw new ServiceError('Quotation already submitted by this vendor', 'CONFLICT');
+        existing.items = dto.items as any;
+        existing.total = dto.items.reduce((sum: number, i: any) => sum + i.totalPrice, 0);
+        existing.status = 'SUBMITTED';
+        return await existing.save();
     }
 
     const quotation = new Quotation({
@@ -52,11 +55,11 @@ export const selectQuotation = async (id: string, tenantId: string): Promise<IQu
     if (!rfq) throw new ServiceError('Linked RFQ not found', 'NOT_FOUND');
 
     if (rfq.status !== 'SENT') {
-        throw new ServiceError('Can only select quotation for SENT RFQs', 'INVALID_STATUS');
+        throw new ServiceError('Can only approve a quotation for SENT RFQs', 'INVALID_STATUS');
     }
 
-    // Update this quotation to SELECTED
-    quotation.status = 'SELECTED';
+    // Update this quotation to APPROVED
+    quotation.status = 'APPROVED';
     await quotation.save();
 
     // Reject all other quotations for this RFQ
@@ -81,8 +84,8 @@ export const deleteQuotation = async (id: string, tenantId: string): Promise<voi
     // or we should warn that it doesn't reopen the RFQ unless explicitly handled.
     // For now, let's just allow deletion of SUBMITTED/REJECTED ones easily.
 
-    if (quotation.status === 'SELECTED') {
-        throw new ServiceError('Cannot delete a SELECTED quotation. Reopen the RFQ first or select another one.', 'INVALID_STATUS');
+    if (quotation.status === 'APPROVED') {
+        throw new ServiceError('Cannot delete an APPROVED quotation. Reopen the RFQ first or select another one.', 'INVALID_STATUS');
     }
 
     quotation.isDeleted = true;

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { auth } from './middleware/auth';
 import { errorHandler } from './middleware/errorHandler';
 import coaRoutes from './routes/chartOfAccount.route';
@@ -17,6 +18,7 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Auth (Set tenant)
 app.use(auth);

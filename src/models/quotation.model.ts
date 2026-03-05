@@ -12,7 +12,8 @@ export interface IQuotation extends Document {
     vendorId: mongoose.Types.ObjectId;
     items: IQuotationItem[];
     total: number;
-    status: 'SUBMITTED' | 'SELECTED' | 'REJECTED';
+    status: 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+    pdfPath?: string;
     isDeleted: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -31,9 +32,10 @@ const QuotationSchema: Schema = new Schema(
         total: { type: Number, required: true, min: 0 },
         status: {
             type: String,
-            enum: ['SUBMITTED', 'SELECTED', 'REJECTED'],
+            enum: ['SUBMITTED', 'APPROVED', 'REJECTED'],
             default: 'SUBMITTED'
         },
+        pdfPath: { type: String },
         isDeleted: { type: Boolean, default: false }
     },
     { timestamps: true }
