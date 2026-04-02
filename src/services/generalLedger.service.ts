@@ -1,7 +1,7 @@
 
-import mongoose, { Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { JournalEntry, EntryStatus } from '../models/journalEntry.model';
-import { ChartOfAccount, AccountType, NormalBalance } from '../models/chartOfAccount.model';
+import { ChartOfAccount } from '../models/chartOfAccount.model';
 import { FiscalCalendar } from '../models/fiscalCalendar.model';
 import { GeneralLedgerQuery } from '../validators/generalLedger.schema';
 
@@ -137,12 +137,22 @@ export class GeneralLedgerService {
             status: EntryStatus.POSTED,
             postingDate: { $gte: startDate, $lte: endDate },
             "lines.accountId": accountId
-        };
+        } as any;
+
+        if (query.search) {
+            const regex = new RegExp(query.search, 'i');
+            activityMatch.$or = [
+                { entryNo: regex },
+                { description: regex },
+                { reference: regex },
+                { sourceNo: regex },
+                { 'lines.description': regex },
+            ];
+        }
 
         const entries = await JournalEntry.aggregate([
-            { $match: activityMatch },
             { $unwind: "$lines" },
-            { $match: { "lines.accountId": accountId } },
+            { $match: activityMatch },
             { $sort: { postingDate: 1, _id: 1 } }, // Chronological
             {
                 $project: {

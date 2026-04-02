@@ -30,6 +30,8 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
     if (err.code === 'VALIDATION_ERROR') statusCode = 400;
     if (err.code === 'INVALID_STATUS') statusCode = 400;
     if (err.code === 'CONFLICT') statusCode = 409;
+    if (err.code === 'FORBIDDEN') statusCode = 403;
+    if (err.code === 'UNAUTHORIZED') statusCode = 401;
 
     const errorResponse = {
         code: err.code || 'INTERNAL_SERVER_ERROR',

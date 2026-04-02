@@ -13,6 +13,7 @@ export const generalLedgerQuerySchema = z.object({
     asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)").optional(),
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)").optional(),
     to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)").optional(),
+    search: z.string().optional(),
     sort: z.enum(['asc', 'desc']).optional().default('asc'),
     page: z.string().transform(Number).optional().default('1'),
     limit: z.string().transform(Number).optional().default('500'),

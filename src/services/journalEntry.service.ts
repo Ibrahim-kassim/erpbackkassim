@@ -32,8 +32,8 @@ const getNextEntryNo = async (tenantId: string): Promise<string> => {
 // Removed local validateFiscalPeriod in favor of fiscalService.resolveDate logic inside post/create logic
 // where we need robust Period + Year + Status checks.
 
-// Helper: Validate Lines & Snapshot Accounts
-const validateAndSnapshotLines = async (tenantId: string, lines: any[]) => {
+// Helper: Validate Lines & Snapshot Accounts (exported for auto-post usage)
+export const validateAndSnapshotLines = async (tenantId: string, lines: any[]) => {
     // ... existing implementation
     const accountIds = lines.map(l => l.accountId);
     const accounts = await ChartOfAccount.find({
@@ -377,4 +377,72 @@ export const deleteDraft = async (id: string, tenantId: string) => {
     }
 
     await JournalEntry.deleteOne({ _id: id, tenantId });
+};
+
+// ─── Auto-post helper (used by AP/AR/GRN services) ────────────────────────────
+// Creates and immediately posts a journal entry from a source document.
+// Validates fiscal period and accounts before saving.
+
+export interface AutoPostLine {
+    accountId: string;
+    debit: number;
+    credit: number;
+    description?: string;
+}
+
+export const createAndPostDirectly = async (
+    tenantId: string,
+    data: {
+        entryType: string;
+        postingDate: Date;
+        description: string;
+        reference?: string;
+        sourceType: string;
+        sourceId: string;
+        sourceNo: string;
+        lines: AutoPostLine[];
+    }
+) => {
+    // 1. Validate and snapshot accounts
+    const { lines, debitTotal, creditTotal } = await validateAndSnapshotLines(tenantId, data.lines);
+
+    // 2. Resolve and validate fiscal period
+    const resolved = await fiscalService.resolveDate(tenantId, data.postingDate);
+    if (!resolved) {
+        throw new ServiceError(
+            `No fiscal period found for date ${data.postingDate.toISOString().split('T')[0]}`,
+            'VALIDATION_ERROR'
+        );
+    }
+    if (resolved.status !== 'OPEN') {
+        throw new ServiceError(
+            `Fiscal period ${resolved.code} is ${resolved.status}. Cannot post.`,
+            'FORBIDDEN'
+        );
+    }
+
+    // 3. Generate entry number
+    const entryNo = await getNextEntryNo(tenantId);
+
+    // 4. Create and save as POSTED directly
+    const entry = new JournalEntry({
+        tenantId,
+        entryNo,
+        status: EntryStatus.POSTED,
+        entryType: data.entryType,
+        postingDate: data.postingDate,
+        fiscalPeriodId: resolved.periodId,
+        fiscalYearId: resolved.fiscalYearId,
+        fiscalPeriodLabelSnapshot: resolved.label,
+        description: data.description,
+        reference: data.reference,
+        sourceType: data.sourceType,
+        sourceId: new Types.ObjectId(data.sourceId),
+        sourceNo: data.sourceNo,
+        lines,
+        totals: { debitTotal, creditTotal },
+        postedAt: new Date(),
+    });
+
+    return await entry.save();
 };

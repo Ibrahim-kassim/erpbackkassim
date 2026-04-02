@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export interface IPOLine {
+    productId?: Types.ObjectId;
+    uomId?: Types.ObjectId;
     description: string;
     quantity: number;
     unitPrice: number;
@@ -9,6 +11,9 @@ export interface IPOLine {
     vatAmount: number;      // lineNet * vatRate/100
     lineTotal: number;      // lineNet + vatAmount
 }
+
+export type POReceiptStatus = 'NOT_APPLICABLE' | 'NOT_RECEIVED' | 'PARTIALLY_RECEIVED' | 'FULLY_RECEIVED';
+export type POBillingStatus = 'NOT_BILLED' | 'PARTIALLY_BILLED' | 'FULLY_BILLED';
 
 export interface IPurchaseOrder extends Document {
     tenantId: string;
@@ -24,6 +29,8 @@ export interface IPurchaseOrder extends Document {
     expectedDeliveryDate?: Date;
     currency: string;
     status: 'DRAFT' | 'APPROVED' | 'CANCELLED' | 'CLOSED';
+    receiptStatus: POReceiptStatus;
+    billingStatus: POBillingStatus;
     notes?: string;
     lines: IPOLine[];
     subtotal: number;
@@ -35,6 +42,8 @@ export interface IPurchaseOrder extends Document {
 }
 
 const POLineSchema = new Schema<IPOLine>({
+    productId: { type: Schema.Types.ObjectId, ref: 'Product' },
+    uomId: { type: Schema.Types.ObjectId, ref: 'Uom' },
     description: { type: String, required: true },
     quantity: { type: Number, required: true, min: 0.0001 },
     unitPrice: { type: Number, required: true, min: 0 },
@@ -62,6 +71,16 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
             type: String,
             enum: ['DRAFT', 'APPROVED', 'CANCELLED', 'CLOSED'],
             default: 'DRAFT',
+        },
+        receiptStatus: {
+            type: String,
+            enum: ['NOT_APPLICABLE', 'NOT_RECEIVED', 'PARTIALLY_RECEIVED', 'FULLY_RECEIVED'],
+            default: 'NOT_RECEIVED',
+        },
+        billingStatus: {
+            type: String,
+            enum: ['NOT_BILLED', 'PARTIALLY_BILLED', 'FULLY_BILLED'],
+            default: 'NOT_BILLED',
         },
         notes: { type: String },
         lines: { type: [POLineSchema], default: [] },

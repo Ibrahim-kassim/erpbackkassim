@@ -8,6 +8,11 @@ export enum EntryStatus {
 
 export enum EntryType {
     JOURNAL_ENTRY = 'Journal Entry',
+    AP_INVOICE = 'AP Invoice',
+    AP_PAYMENT = 'AP Payment',
+    AR_INVOICE = 'AR Invoice',
+    AR_RECEIPT = 'AR Receipt',
+    GOODS_RECEIPT_NOTE = 'Goods Receipt Note',
     INTER_COMPANY_JOURNAL_ENTRY = 'Inter Company Journal Entry',
     BANK_ENTRY = 'Bank Entry',
     CASH_ENTRY = 'Cash Entry',

@@ -4,6 +4,8 @@ import * as poService from '../services/purchaseOrder.service';
 import { z } from 'zod';
 
 const lineSchema = z.object({
+    productId: z.string().optional(),
+    uomId: z.string().optional(),
     description: z.string().min(1),
     quantity: z.number().positive(),
     unitPrice: z.number().min(0),
