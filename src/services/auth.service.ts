@@ -29,41 +29,53 @@ const generateSlug = (name: string): string =>
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const resolveTenantForLogin = async (tenantInput: string, email: string) => {
-    const raw = tenantInput.trim();
-    const normalizedSlug = generateSlug(raw);
+const resolveTenantForLogin = async (tenantInput: string | undefined, email: string) => {
+    const raw = tenantInput?.trim();
 
-    let tenant = await Tenant.findOne({
-        isActive: true,
-        $or: [
-            { slug: raw.toLowerCase() },
-            { slug: normalizedSlug },
-            { name: { $regex: `^${escapeRegex(raw)}$`, $options: 'i' } },
-        ],
-    });
+    if (raw) {
+        const normalizedSlug = generateSlug(raw);
 
-    if (!tenant) {
-        const userTenants = await User.find({
-            email,
+        const tenant = await Tenant.findOne({
             isActive: true,
-        }).distinct('tenantId');
+            $or: [
+                { slug: raw.toLowerCase() },
+                { slug: normalizedSlug },
+                { name: { $regex: `^${escapeRegex(raw)}$`, $options: 'i' } },
+            ],
+        });
 
-        if (userTenants.length === 1) {
-            tenant = await Tenant.findOne({
-                slug: userTenants[0],
-                isActive: true,
-            });
+        if (tenant) {
+            return tenant;
         }
     }
 
-    return tenant;
+    const userTenants = await User.find({
+        email,
+        isActive: true,
+    }).distinct('tenantId');
+
+    if (userTenants.length === 1) {
+        return Tenant.findOne({
+            slug: userTenants[0],
+            isActive: true,
+        });
+    }
+
+    if (userTenants.length > 1) {
+        throw new ServiceError(
+            'This email belongs to multiple companies. Please ask your administrator to use a unique email per company or restore company-based login.',
+            'VALIDATION_ERROR'
+        );
+    }
+
+    return null;
 };
 
 const signAccess = (payload: { userId: string; tenantId: string; role: string }) =>
     jwt.sign(payload, config.jwtSecret, { expiresIn: '15m' });
 
 const signRefresh = (payload: { userId: string; tenantId: string }) =>
-    jwt.sign(payload, config.jwtRefreshSecret, { expiresIn: '7d' });
+    jwt.sign(payload, config.jwtRefreshSecret, { expiresIn: '30d' });
 
 const safeUser = (user: IUser) => ({
     id: user._id,
@@ -115,10 +127,10 @@ export const register = async (dto: RegisterDTO) => {
 // ─── Login ────────────────────────────────────────────────────────────────────
 
 export const login = async (dto: LoginDTO) => {
-    // 1. Resolve tenant by company id, company name, or single active tenant for the email
+    // 1. Resolve tenant by email, with optional company hint when provided
     const tenant = await resolveTenantForLogin(dto.tenantSlug, dto.email);
     if (!tenant) {
-        throw new ServiceError('Company not found or inactive. Use your company ID (slug) or exact company name.', 'NOT_FOUND');
+        throw new ServiceError('No active company account was found for this email.', 'NOT_FOUND');
     }
 
     // 2. Find user

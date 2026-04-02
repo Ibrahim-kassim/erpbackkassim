@@ -6,7 +6,6 @@ import { requireRole } from '../middleware/requireRole';
 const router = Router();
 
 // ── Public routes (no auth required) ─────────────────────────────────────────
-router.post('/register', controller.register);
 router.post('/login', controller.login);
 router.post('/refresh', controller.refresh);
 

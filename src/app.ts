@@ -47,9 +47,17 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use(mongoSanitize());
 
 // ── Rate limiting on auth ──────────────────────────────────────────────────────
-const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        code: 'TOO_MANY_REQUESTS',
+        message: 'Too many login attempts. Please wait a minute and try again.',
+    },
+});
 app.use('/api/v1/auth/login', authLimiter);
-app.use('/api/v1/auth/register', authLimiter);
 
 // ── Public routes (no auth required) ──────────────────────────────────────────
 app.use('/api/v1/auth', authRoutes);
