@@ -1,8 +1,10 @@
 import { config } from '../config/env';
+import { copilotModuleCatalogText, CopilotModuleKey, resolveModuleKeyFallback } from './dashboardCopilotCapabilities.service';
 
 type PromptClassification = {
     intent:
         | 'GREETING'
+        | 'ASK_HELP'
         | 'NAVIGATE'
         | 'ASK'
         | 'CONTINUE_WORKFLOW'
@@ -45,6 +47,7 @@ type PromptClassification = {
         | 'PRODUCTS'
         | 'STOCK_OVERVIEW'
         | 'SETTINGS';
+    moduleKey?: CopilotModuleKey;
     chartKey?: 'cash_flow' | 'document_throughput' | 'overdue_balances' | 'inventory_risk';
     previewKey?: 'dashboard_overview' | 'overdue_customers' | 'overdue_vendors' | 'recent_activity' | 'payables_risk_summary';
 };
@@ -58,6 +61,7 @@ const hasOpenAi = () => Boolean(config.openaiApiKey);
 
 const ALLOWED_INTENTS = new Set([
     'GREETING',
+    'ASK_HELP',
     'NAVIGATE',
     'ASK',
     'CONTINUE_WORKFLOW',
@@ -104,6 +108,22 @@ const ALLOWED_PAGE_KEYS = new Set([
     'SETTINGS',
 ] as const);
 
+const ALLOWED_MODULE_KEYS = new Set([
+    'BUSINESS_PARTNERS',
+    'PRODUCTS',
+    'CATEGORIES',
+    'UOMS',
+    'AR_INVOICES',
+    'AP_INVOICES',
+    'AR_RECEIPTS',
+    'AP_PAYMENTS',
+    'RFQS',
+    'PURCHASE_ORDERS',
+    'GOODS_RECEIPTS',
+    'CHART_ACCOUNTS',
+    'FISCAL_YEARS',
+] as const);
+
 const ALLOWED_CHART_KEYS = new Set(['cash_flow', 'document_throughput', 'overdue_balances', 'inventory_risk'] as const);
 const ALLOWED_PREVIEW_KEYS = new Set(['dashboard_overview', 'overdue_customers', 'overdue_vendors', 'recent_activity', 'payables_risk_summary'] as const);
 
@@ -148,17 +168,21 @@ const ERP_ACTION_CATALOG = [
 const CLASSIFIER_INSTRUCTIONS = [
     'You classify ERP assistant prompts.',
     'Return strict JSON only.',
-    'Allowed intent values: GREETING, NAVIGATE, ASK, CONTINUE_WORKFLOW, RESUME_WORKFLOW, CANCEL_WORKFLOW, DRAW_CHART, PREVIEW_CSV, PREVIEW_PDF, CREATE_RFQ, CREATE_CATEGORY, CREATE_UOM, CREATE_AR_INVOICE, CREATE_PURCHASE_ORDER, CREATE_GRN, CREATE_AP_INVOICE, CREATE_AR_RECEIPT, CREATE_AP_PAYMENT, CREATE_CHART_ACCOUNT, CREATE_FISCAL_YEAR, CREATE_BUSINESS_PARTNER, CREATE_PRODUCT, FIELDS_MISSING.',
+    'Allowed intent values: GREETING, ASK_HELP, NAVIGATE, ASK, CONTINUE_WORKFLOW, RESUME_WORKFLOW, CANCEL_WORKFLOW, DRAW_CHART, PREVIEW_CSV, PREVIEW_PDF, CREATE_RFQ, CREATE_CATEGORY, CREATE_UOM, CREATE_AR_INVOICE, CREATE_PURCHASE_ORDER, CREATE_GRN, CREATE_AP_INVOICE, CREATE_AR_RECEIPT, CREATE_AP_PAYMENT, CREATE_CHART_ACCOUNT, CREATE_FISCAL_YEAR, CREATE_BUSINESS_PARTNER, CREATE_PRODUCT, FIELDS_MISSING.',
     'Allowed pageKey values: DASHBOARD, CHART_OF_ACCOUNTS, JOURNAL_ENTRIES, FISCAL_CALENDAR, GENERAL_LEDGER, FINANCIAL_STATEMENTS, BUSINESS_PARTNERS, RFQS, PURCHASE_ORDERS, GOODS_RECEIPTS, AP_INVOICES, AP_PAYMENTS, AP_AGING, AR_INVOICES, AR_RECEIPTS, AR_AGING, PRODUCTS, STOCK_OVERVIEW, SETTINGS.',
     'Only set pageKey for NAVIGATE.',
+    'Allowed moduleKey values: BUSINESS_PARTNERS, PRODUCTS, CATEGORIES, UOMS, AR_INVOICES, AP_INVOICES, AR_RECEIPTS, AP_PAYMENTS, RFQS, PURCHASE_ORDERS, GOODS_RECEIPTS, CHART_ACCOUNTS, FISCAL_YEARS.',
+    'Set moduleKey whenever the user is asking about a module, exporting a module, charting a module, or asking for records from a module.',
     'Allowed chartKey values: cash_flow, document_throughput, overdue_balances, inventory_risk.',
     'Allowed previewKey values: dashboard_overview, overdue_customers, overdue_vendors, recent_activity, payables_risk_summary.',
     'Only set chartKey for DRAW_CHART and previewKey for PREVIEW_CSV or PREVIEW_PDF.',
     'If the user wants to open, go to, navigate to, or be taken to a page/module/screen, classify as NAVIGATE, not as a create action.',
     `ERP pages: ${ERP_PAGE_CATALOG}.`,
     `ERP create actions: ${ERP_ACTION_CATALOG}.`,
+    `ERP modules: ${copilotModuleCatalogText}.`,
     'Prefer semantic understanding over keyword matching.',
     'If the user asks to open a module page, do not classify as a create action.',
+    'If the user asks what this system is, how it works, what modules exist, or what the assistant can do, classify as ASK_HELP.',
     'If there is an active workflow and the user is supplying values, corrections, or the next requested details for that workflow, classify as CONTINUE_WORKFLOW.',
     'If the user wants to pick up a paused workflow, classify as RESUME_WORKFLOW.',
     'If the user wants to stop, dismiss, close, drop, or cancel the active workflow, classify as CANCEL_WORKFLOW.',
@@ -171,8 +195,10 @@ const ASSISTANT_INSTRUCTIONS = [
     'Never claim you created, posted, sent, approved, confirmed, cancelled, or deleted anything unless the factual context says so.',
     'If something is missing, ask clearly for it.',
     'Use plain English and keep the response compact.',
-    'Do not use markdown headings, markdown tables, code fences, or pseudo-report formatting.',
-    'Reply as clean plain text only.',
+    'Organize answers clearly with short section labels, bullet points, or numbered steps when helpful.',
+    'You may use light friendly emoji sparingly when it improves readability.',
+    'Do not use markdown tables, code fences, or noisy pseudo-report formatting.',
+    'Reply as clean readable text only.',
 ].join(' ');
 
 const normalizeAssistantText = (text: string, fallback: string) => {
@@ -256,6 +282,10 @@ function sanitizeClassification(output: PromptClassification | null | undefined)
         next.pageKey = output.pageKey;
     }
 
+    if (output.moduleKey && ALLOWED_MODULE_KEYS.has(output.moduleKey)) {
+        next.moduleKey = output.moduleKey;
+    }
+
     if (output.chartKey && ALLOWED_CHART_KEYS.has(output.chartKey)) {
         next.chartKey = output.chartKey;
     }
@@ -267,8 +297,8 @@ function sanitizeClassification(output: PromptClassification | null | undefined)
     return next;
 }
 
-export async function classifyDashboardPrompt(message: string, workflowSummary = ''): Promise<PromptClassification> {
-    const fallback = classifyDashboardPromptFallback(message);
+export async function classifyDashboardPrompt(message: string, workflowSummary = '', conversationContext = ''): Promise<PromptClassification> {
+    const fallback = classifyDashboardPromptFallback(message, conversationContext);
 
     try {
         const result = await callOpenAiJson<PromptClassification>(
@@ -276,8 +306,10 @@ export async function classifyDashboardPrompt(message: string, workflowSummary =
             [
                 `User message: ${message}`,
                 `Current workflow: ${workflowSummary || 'none'}`,
+                `Conversation context: ${conversationContext || 'none'}`,
                 `Available pages: ${ERP_PAGE_CATALOG}`,
                 `Available create actions: ${ERP_ACTION_CATALOG}`,
+                `Available modules: ${copilotModuleCatalogText}`,
             ].join('\n')
         );
 
@@ -323,11 +355,20 @@ export async function composeDashboardAssistantText(params: {
     }
 }
 
-function classifyDashboardPromptFallback(message: string): PromptClassification {
+function classifyDashboardPromptFallback(message: string, conversationContext = ''): PromptClassification {
     const normalized = message.toLowerCase();
+    const moduleKey = resolveModuleKeyFallback(message) || resolveModuleKeyFallback(conversationContext);
+    const hasContextualReference = /\b(them|those|that|it|these|same|this one|that one)\b/.test(normalized);
 
     if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(normalized)) {
+        if (/(tell me about|about the system|what can you do|how does this system work|how this system work|explain the system|about this erp|what modules|how can you help)/.test(normalized)) {
+            return { intent: 'ASK_HELP', moduleKey };
+        }
         return { intent: 'GREETING' };
+    }
+
+    if (/(tell me about|about the system|what can you do|how does this system work|how this system work|explain the system|about this erp|what modules|how can you help)/.test(normalized)) {
+        return { intent: 'ASK_HELP', moduleKey };
     }
 
     if (/(resume|continue|bring back|open the form again|continue the form|resume form)/.test(normalized)) {
@@ -415,11 +456,11 @@ function classifyDashboardPromptFallback(message: string): PromptClassification 
     }
 
     if (/(what fields|what.*missing|missing fields|what else do you need)/.test(normalized)) {
-        return { intent: 'FIELDS_MISSING' };
+        return { intent: 'FIELDS_MISSING', moduleKey };
     }
 
     if (/^(name|title|vendor|customer|category|uom|account|amount|date|qty|quantity|price|cost|type|status|email|phone|tax)\b/.test(normalized) || /^(it is|it's|use|set|make it|change it to)\b/.test(normalized)) {
-        return { intent: 'CONTINUE_WORKFLOW' };
+        return { intent: 'CONTINUE_WORKFLOW', moduleKey };
     }
 
     if (/(create|make|prepare).*(rfq|request for quotation|quotation request)/.test(normalized)) {
@@ -475,48 +516,51 @@ function classifyDashboardPromptFallback(message: string): PromptClassification 
     }
 
     if (/(csv|excel|spreadsheet).*(overdue customer|customer aging|receivable)/.test(normalized)) {
-        return { intent: 'PREVIEW_CSV', previewKey: 'overdue_customers' };
+        return { intent: 'PREVIEW_CSV', previewKey: 'overdue_customers', moduleKey: 'AR_INVOICES' };
     }
 
     if (/(csv|excel|spreadsheet).*(overdue vendor|payable|ap aging|vendor aging)/.test(normalized)) {
-        return { intent: 'PREVIEW_CSV', previewKey: 'overdue_vendors' };
+        return { intent: 'PREVIEW_CSV', previewKey: 'overdue_vendors', moduleKey: 'AP_INVOICES' };
     }
 
     if (/(csv|excel|spreadsheet).*(recent activity|recent documents)/.test(normalized)) {
-        return { intent: 'PREVIEW_CSV', previewKey: 'recent_activity' };
+        return { intent: 'PREVIEW_CSV', previewKey: 'recent_activity', moduleKey };
     }
 
     if (/(csv|excel|spreadsheet)/.test(normalized)) {
-        return { intent: 'PREVIEW_CSV', previewKey: 'dashboard_overview' };
+        if (hasContextualReference && moduleKey) {
+            return { intent: 'PREVIEW_CSV', previewKey: 'dashboard_overview', moduleKey };
+        }
+        return { intent: 'PREVIEW_CSV', previewKey: 'dashboard_overview', moduleKey };
     }
 
     if (/(pdf).*(payables|payable risk|vendor risk|ap risk)/.test(normalized)) {
-        return { intent: 'PREVIEW_PDF', previewKey: 'payables_risk_summary' };
+        return { intent: 'PREVIEW_PDF', previewKey: 'payables_risk_summary', moduleKey: 'AP_INVOICES' };
     }
 
     if (/\bpdf\b/.test(normalized)) {
-        return { intent: 'PREVIEW_PDF', previewKey: 'payables_risk_summary' };
+        return { intent: 'PREVIEW_PDF', previewKey: 'payables_risk_summary', moduleKey };
     }
 
     if (/(draw|show|plot).*(cash|cash flow|cash movement)/.test(normalized)) {
-        return { intent: 'DRAW_CHART', chartKey: 'cash_flow' };
+        return { intent: 'DRAW_CHART', chartKey: 'cash_flow', moduleKey };
     }
 
     if (/(draw|show|plot).*(document|throughput|invoice|receipt|payment)/.test(normalized)) {
-        return { intent: 'DRAW_CHART', chartKey: 'document_throughput' };
+        return { intent: 'DRAW_CHART', chartKey: 'document_throughput', moduleKey };
     }
 
     if (/(draw|show|plot).*(overdue|aging|receivable|payable)/.test(normalized)) {
-        return { intent: 'DRAW_CHART', chartKey: 'overdue_balances' };
+        return { intent: 'DRAW_CHART', chartKey: 'overdue_balances', moduleKey };
     }
 
     if (/(draw|show|plot).*(inventory|stock)/.test(normalized)) {
-        return { intent: 'DRAW_CHART', chartKey: 'inventory_risk' };
+        return { intent: 'DRAW_CHART', chartKey: 'inventory_risk', moduleKey };
     }
 
     if (/(draw|show|plot).*(chart|graph)/.test(normalized)) {
-        return { intent: 'DRAW_CHART', chartKey: 'cash_flow' };
+        return { intent: 'DRAW_CHART', chartKey: 'cash_flow', moduleKey };
     }
 
-    return { intent: 'ASK' };
+    return { intent: 'ASK', moduleKey };
 }

@@ -27,6 +27,14 @@ import { createRFQSchema } from '../validators/rfq.schema';
 import type { DashboardChatActionDTO, DashboardChatMessageDTO } from '../validators/dashboardChat.schema';
 import { getDashboardOverview, queryDashboard } from './dashboard.service';
 import { assistantModuleRegistry, AssistantExecutionMode, AssistantFormType, getExecutionChoices } from './dashboardChat.registry';
+import {
+    buildCopilotModulePdfLines,
+    CopilotModuleKey,
+    extractCopilotModuleFilters,
+    getCopilotModuleChart,
+    getCopilotModuleDestination,
+    getCopilotModuleSummary,
+} from './dashboardCopilotCapabilities.service';
 import { classifyDashboardPrompt, composeDashboardAssistantText } from './dashboardLlm.service';
 import * as apInvoiceService from './apInvoice.service';
 import * as apPaymentService from './apPayment.service';
@@ -119,7 +127,7 @@ const makeId = () => new Types.ObjectId().toString();
 
 const assistantNavigationMap = {
     DASHBOARD: { title: 'Dashboard', destination: '/dashboard' },
-    CHART_OF_ACCOUNTS: { title: 'Chart of Accounts', destination: '/' },
+    CHART_OF_ACCOUNTS: { title: 'Chart of Accounts', destination: '/chart-of-accounts' },
     JOURNAL_ENTRIES: { title: 'Journal Entries', destination: '/journal-entries' },
     FISCAL_CALENDAR: { title: 'Fiscal Calendar', destination: '/fiscal-calendar' },
     GENERAL_LEDGER: { title: 'General Ledger', destination: '/general-ledger' },
@@ -1385,6 +1393,254 @@ async function buildPdfPreview(tenantId: string, sessionId: string) {
     };
 }
 
+async function answerCapabilityQuestion(
+    tenantId: string,
+    moduleKey: CopilotModuleKey,
+    message: string,
+    conversationContext: string,
+) {
+    const filters = extractCopilotModuleFilters(moduleKey, message);
+    const summary = await getCopilotModuleSummary(tenantId, moduleKey, filters);
+    const defaultText = [
+        `Overview`,
+        summary.summary,
+        ``,
+        `Highlights`,
+        ...summary.facts.map((fact) => `- ${fact}`),
+        ``,
+        `Next`,
+        `1. Ask me to draw a chart for this module.`,
+        `2. Ask for an Excel or CSV export.`,
+        `3. Open the module if you want the full page.`,
+    ].join('\n');
+    const text = await composeDashboardAssistantText({
+        userMessage: message,
+        conversationContext,
+        factualContext: compactFacts({
+            module: summary.title,
+            summary: summary.summary,
+            facts: summary.facts,
+            latestRows: summary.rows.slice(0, 4),
+        }),
+        defaultText,
+    });
+
+    return {
+        text,
+        table: summary.rows.length
+            ? {
+                type: 'table_preview',
+                title: `${summary.title} Snapshot`,
+                columns: summary.columns,
+                rows: summary.rows.slice(0, 8),
+            } as ChatBlock
+            : null,
+    };
+}
+
+async function buildFilteredModuleCsvPreview(tenantId: string, sessionId: string, moduleKey: CopilotModuleKey, message: string) {
+    const filters = extractCopilotModuleFilters(moduleKey, message);
+    const summary = await getCopilotModuleSummary(tenantId, moduleKey, filters);
+    const fileName = `${moduleKey.toLowerCase()}.csv`;
+    const artifact = await createArtifact({
+        tenantId,
+        sessionId,
+        kind: 'CSV',
+        title: `${summary.title} Export`,
+        fileName,
+        mimeType: 'text/csv',
+        data: buildCsv(summary.columns, summary.rows),
+        preview: { columns: summary.columns, rows: summary.rows },
+    });
+
+    return {
+        text: `I prepared a live spreadsheet-style export for ${summary.title.toLowerCase()}.`,
+        block: {
+            type: 'csv_preview',
+            title: `${summary.title} Export`,
+            columns: summary.columns,
+            rows: summary.rows.slice(0, 12),
+            artifactId: artifact._id.toString(),
+            fileName,
+        } as ChatBlock,
+    };
+}
+
+async function buildModuleCsvPreview(tenantId: string, sessionId: string, moduleKey: CopilotModuleKey) {
+    const summary = await getCopilotModuleSummary(tenantId, moduleKey);
+    const fileName = `${moduleKey.toLowerCase()}.csv`;
+    const artifact = await createArtifact({
+        tenantId,
+        sessionId,
+        kind: 'CSV',
+        title: `${summary.title} Export`,
+        fileName,
+        mimeType: 'text/csv',
+        data: buildCsv(summary.columns, summary.rows),
+        preview: { columns: summary.columns, rows: summary.rows },
+    });
+
+    return {
+        text: `I prepared a live spreadsheet-style export for ${summary.title.toLowerCase()}.`,
+        block: {
+            type: 'csv_preview',
+            title: `${summary.title} Export`,
+            columns: summary.columns,
+            rows: summary.rows.slice(0, 12),
+            artifactId: artifact._id.toString(),
+            fileName,
+        } as ChatBlock,
+    };
+}
+
+async function buildModulePdfPreview(tenantId: string, sessionId: string, moduleKey: CopilotModuleKey, message?: string) {
+    const filters = message ? extractCopilotModuleFilters(moduleKey, message) : undefined;
+    const summary = await getCopilotModuleSummary(tenantId, moduleKey, filters);
+    const artifact = await createArtifact({
+        tenantId,
+        sessionId,
+        kind: 'PDF',
+        title: `${summary.title} Summary`,
+        fileName: `${moduleKey.toLowerCase()}-summary.pdf`,
+        mimeType: 'application/pdf',
+        data: buildSimplePdf(`${summary.title} Summary`, await buildCopilotModulePdfLines(tenantId, moduleKey, filters)),
+    });
+
+    return {
+        text: `I generated a PDF summary for ${summary.title.toLowerCase()} from live ERP data.`,
+        block: {
+            type: 'pdf_preview',
+            title: `${summary.title} Summary`,
+            summary: summary.summary,
+            artifactId: artifact._id.toString(),
+            fileName: artifact.fileName,
+        } as ChatBlock,
+    };
+}
+
+async function buildModuleChartPreview(tenantId: string, moduleKey: CopilotModuleKey, message?: string) {
+    const filters = message ? extractCopilotModuleFilters(moduleKey, message) : undefined;
+    const normalized = safeLower(message || '');
+
+    if (moduleKey === 'CHART_ACCOUNTS' && /(tree|hierarchy|structure)/.test(normalized)) {
+        const tree = await chartOfAccountService.getAccountTree(tenantId);
+        const rows: string[][] = [];
+
+        const visit = (nodes: any[], depth = 0) => {
+            for (const node of nodes || []) {
+                rows.push([
+                    `${'  '.repeat(depth)}${node.code}`,
+                    node.name,
+                    node.type,
+                    node.isPosting ? 'Posting' : 'Header',
+                    node.isActive ? 'Active' : 'Inactive',
+                ]);
+                if (Array.isArray(node.children) && node.children.length) {
+                    visit(node.children, depth + 1);
+                }
+            }
+        };
+
+        visit(tree);
+
+        return {
+            text: 'I prepared the real Chart of Accounts hierarchy from your live ERP data.',
+            block: {
+                type: 'table_preview',
+                title: 'Chart of Accounts Tree',
+                columns: ['Code', 'Name', 'Type', 'Kind', 'Status'],
+                rows: rows.slice(0, 40),
+            } as ChatBlock,
+            extraBlock: null as ChatBlock | null,
+        };
+    }
+
+    const chart = await getCopilotModuleChart(tenantId, moduleKey, filters);
+    const extraBlock = moduleKey === 'CHART_ACCOUNTS'
+        ? {
+            type: 'table_preview',
+            title: 'Chart of Accounts Snapshot',
+            columns: ['Code', 'Name', 'Type', 'Posting', 'Active'],
+            rows: (await getCopilotModuleSummary(tenantId, moduleKey, filters)).rows.slice(0, 12),
+        } as ChatBlock
+        : null;
+    return {
+        text: `I drew a live chart for ${copilotModuleRegistryTitle(moduleKey)} using current tenant data.`,
+        block: {
+            type: 'chart',
+            title: chart.title,
+            subtitle: chart.subtitle,
+            chartKind: chart.chartKind,
+            data: chart.data,
+            series: chart.series,
+        } as ChatBlock,
+        extraBlock,
+    };
+}
+
+function copilotModuleRegistryTitle(moduleKey: CopilotModuleKey) {
+    return moduleKey
+        .toLowerCase()
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+async function buildSystemOverviewAnswer(params: {
+    tenantId: string;
+    userMessage: string;
+    conversationContext: string;
+    overview: Awaited<ReturnType<typeof getDashboardOverview>>;
+}) {
+    const modules = [
+        'Chart of Accounts and Journal Entries',
+        'Fiscal Calendar',
+        'Business Partners',
+        'Products, Categories, and UOMs',
+        'RFQs and Purchase Orders',
+        'Goods Receipts',
+        'Vendor Bills and Vendor Payments',
+        'Customer Invoices and Customer Receipts',
+        'General Ledger, Aging, and Statements',
+        'Settings and branded documents',
+    ];
+
+    const capabilities = [
+        'guide users through ERP workflows',
+        'answer live questions about records and balances',
+        'prepare charts from supported modules',
+        'prepare CSV-style exports',
+        'prepare PDF summaries',
+        'help create operational and finance records through chat forms',
+    ];
+
+    const defaultText = [
+        'Overview',
+        'ERP KASSIM covers accounting, procurement, inventory, receivables, payables, fiscal setup, and reporting.',
+        '',
+        'Main modules',
+        ...modules.map((module) => `- ${module}`),
+        '',
+        'What I can do',
+        ...capabilities.map((capability, index) => `${index + 1}. ${capability}`),
+        '',
+        'Next',
+        'Tell me which area you want help with, and I can guide the workflow, show records, export data, or open the right page.',
+    ].join('\n');
+
+    return composeDashboardAssistantText({
+        userMessage: params.userMessage,
+        conversationContext: params.conversationContext,
+        factualContext: compactFacts({
+            modules,
+            capabilities,
+            company: params.overview.company,
+            kpis: params.overview.kpis,
+        }),
+        defaultText,
+    });
+}
+
 async function prepareRfqFromMessage(tenantId: string, message: string, existing?: PendingAction | null) {
     const options = await loadFormOptions(tenantId, ['vendors', 'products', 'uoms']);
     const matchedVendor = bestEntityMatch(message, options.vendors);
@@ -2041,9 +2297,9 @@ export async function sendDashboardChatMessage(tenantId: string, userId: string,
     const workflowStack = getWorkflowStack(session);
     const activeWorkflowNode = getActiveWorkflowNode(workflowStack, session.activeWorkflowId);
     const currentWorkflowState = deriveWorkflowStateFromNode(activeWorkflowNode);
-    const classification = await classifyDashboardPrompt(dto.message, getWorkflowSummary(currentWorkflowState));
     const overview = await getDashboardOverview(tenantId);
     const conversationContext = buildConversationContext(session.turns as ChatTurn[], session.conversationSummary || '');
+    const classification = await classifyDashboardPrompt(dto.message, getWorkflowSummary(currentWorkflowState), conversationContext);
     const blocks: ChatBlock[] = [];
     let nextPendingAction: PendingAction | null = activeWorkflowNode ? toPendingAction(activeWorkflowNode) : session.pendingAction as PendingAction | null;
     let nextWorkflowState: WorkflowState | null = currentWorkflowState;
@@ -2133,6 +2389,14 @@ export async function sendDashboardChatMessage(tenantId: string, userId: string,
             defaultText,
         });
         blocks.push({ type: 'text', text });
+    } else if (classification.intent === 'ASK_HELP') {
+        const text = await buildSystemOverviewAnswer({
+            tenantId,
+            userMessage: dto.message,
+            conversationContext,
+            overview,
+        });
+        blocks.push({ type: 'text', text });
     } else if (classification.intent === 'NAVIGATE' && classification.pageKey) {
         const target = assistantNavigationMap[classification.pageKey];
         blocks.push({
@@ -2147,24 +2411,49 @@ export async function sendDashboardChatMessage(tenantId: string, userId: string,
             autoNavigate: true,
         });
     } else if (classification.intent === 'DRAW_CHART') {
-        blocks.push({
-            type: 'text',
-            text: await composeDashboardAssistantText({
-                userMessage: dto.message,
-                conversationContext,
-                factualContext: compactFacts({ chart: classification.chartKey, kpis: overview.kpis, operations: overview.operations }),
-                defaultText: 'I drew a live chart from the current ERP data so you can inspect the trend directly.',
-            }),
-        });
-        blocks.push(buildChartBlock(overview, classification.chartKey));
+        if (classification.moduleKey) {
+            const preview = await buildModuleChartPreview(tenantId, classification.moduleKey, dto.message);
+            blocks.push({ type: 'text', text: preview.text });
+            blocks.push(preview.block);
+            if (preview.extraBlock) {
+                blocks.push(preview.extraBlock);
+            }
+        } else {
+            blocks.push({
+                type: 'text',
+                text: await composeDashboardAssistantText({
+                    userMessage: dto.message,
+                    conversationContext,
+                    factualContext: compactFacts({ chart: classification.chartKey, kpis: overview.kpis, operations: overview.operations }),
+                    defaultText: 'I drew a live chart from the current ERP data so you can inspect the trend directly.',
+                }),
+            });
+            blocks.push(buildChartBlock(overview, classification.chartKey));
+        }
     } else if (classification.intent === 'PREVIEW_CSV') {
-        const preview = await buildCsvPreview(tenantId, dto.sessionId, classification.previewKey);
+        const preview = classification.moduleKey
+            ? await buildFilteredModuleCsvPreview(tenantId, dto.sessionId, classification.moduleKey, dto.message)
+            : await buildCsvPreview(tenantId, dto.sessionId, classification.previewKey);
         blocks.push({ type: 'text', text: preview.text });
         blocks.push(preview.block);
     } else if (classification.intent === 'PREVIEW_PDF') {
-        const preview = await buildPdfPreview(tenantId, dto.sessionId);
+        const preview = classification.moduleKey
+            ? await buildModulePdfPreview(tenantId, dto.sessionId, classification.moduleKey, dto.message)
+            : await buildPdfPreview(tenantId, dto.sessionId);
         blocks.push({ type: 'text', text: preview.text });
         blocks.push(preview.block);
+    } else if (classification.intent === 'ASK' && classification.moduleKey) {
+        const answer = await answerCapabilityQuestion(tenantId, classification.moduleKey, dto.message, conversationContext);
+        blocks.push({ type: 'text', text: answer.text });
+        if (answer.table) {
+            blocks.push(answer.table);
+        }
+        blocks.push({
+            type: 'navigation',
+            title: `Open ${copilotModuleRegistryTitle(classification.moduleKey)}`,
+            destination: getCopilotModuleDestination(classification.moduleKey),
+            summary: `Open the ${copilotModuleRegistryTitle(classification.moduleKey)} module.`,
+        });
     } else if (classification.intent === 'CREATE_CATEGORY') {
         const prepared = await prepareCategoryFromMessage(tenantId, dto.message, nextPendingAction);
         const activation = activatePreparedWorkflow({
@@ -2593,6 +2882,7 @@ export async function submitDashboardChatAction(tenantId: string, userId: string
     const activeWorkflowNode = getActiveWorkflowNode(workflowStack, session.activeWorkflowId);
     const pendingAction = session.pendingAction as PendingAction | null;
     const currentWorkflowState = (session.workflowState || session.workingState || null) as WorkflowState | null;
+    const isConfirmExecution = dto.actionType === 'confirm_execution';
 
     if (dto.actionType === 'resume_workflow') {
         const workflowId = 'workflowId' in dto ? dto.workflowId : undefined;
@@ -2686,7 +2976,7 @@ export async function submitDashboardChatAction(tenantId: string, userId: string
     const submitDto = dto;
 
     const targetWorkflow = activeWorkflowNode || (submitDto.formType && workflowStack.find((workflow) => workflow.formType === submitDto.formType)) || null;
-    if (dto.actionType === 'submit_form') {
+    if (dto.actionType === 'submit_form' && !isConfirmExecution) {
         const mergedValues = { ...(targetWorkflow?.values || {}), ...submitDto.values };
         const missingFields = computeMissingFields(submitDto.formType, mergedValues);
         const executionMode = submitDto.executionMode || targetWorkflow?.executionMode || pendingAction?.defaultExecutionMode || 'SAVE';
