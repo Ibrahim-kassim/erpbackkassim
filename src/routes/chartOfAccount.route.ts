@@ -7,6 +7,8 @@ const router = Router();
 router.get('/', controller.list);
 router.get('/tree', controller.getTree);
 router.get('/posting', controller.getPosting);
+router.post('/starter-chart', controller.createStarterChart);
+router.post('/import', controller.importRows);
 router.get('/:id', controller.getById);
 
 router.post('/', controller.create);

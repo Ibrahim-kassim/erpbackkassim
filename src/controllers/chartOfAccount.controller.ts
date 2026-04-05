@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { createAccountSchema, updateAccountSchema } from '../validators/chartOfAccount.schema';
+import { createAccountSchema, importAccountsSchema, updateAccountSchema } from '../validators/chartOfAccount.schema';
 import * as service from '../services/chartOfAccount.service';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -65,5 +65,25 @@ export const getTree = asyncHandler(async (req: Request, res: Response) => {
 
 export const getPosting = asyncHandler(async (req: Request, res: Response) => {
     const data = await service.getPostingAccounts(req.tenantId!);
+    res.status(200).json({ data });
+});
+
+export const createStarterChart = asyncHandler(async (req: Request, res: Response) => {
+    const data = await service.createStarterChart(req.tenantId!);
+    res.status(201).json({ data });
+});
+
+export const importRows = asyncHandler(async (req: Request, res: Response) => {
+    const validation = importAccountsSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid import payload',
+            details: validation.error.format(),
+        });
+        return;
+    }
+
+    const data = await service.importAccounts(req.tenantId!, validation.data.accounts);
     res.status(200).json({ data });
 });

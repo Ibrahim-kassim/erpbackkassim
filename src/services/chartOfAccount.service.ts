@@ -1,5 +1,5 @@
 import { ChartOfAccount, AccountType, NormalBalance, IChartOfAccount } from '../models/chartOfAccount.model';
-import { CreateAccountDTO, UpdateAccountDTO } from '../validators/chartOfAccount.schema';
+import { CreateAccountDTO, ImportAccountRowDTO, UpdateAccountDTO } from '../validators/chartOfAccount.schema';
 import mongoose, { Types } from 'mongoose';
 
 class ServiceError extends Error {
@@ -277,4 +277,182 @@ export const getAccountTree = async (tenantId: string) => {
     });
 
     return roots;
+};
+
+type StarterChartTemplateRow = {
+    code: string;
+    name: string;
+    type: AccountType;
+    isPosting: boolean;
+    isActive?: boolean;
+    description?: string;
+    systemControlled?: boolean;
+    parentCode?: string | null;
+};
+
+const defaultStarterTemplate: StarterChartTemplateRow[] = [
+    { code: '1000', name: 'Application Of Funds', type: AccountType.ASSET, isPosting: false },
+    { code: '1100', name: 'Cash In Hand', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '1200', name: 'Bank Accounts', type: AccountType.ASSET, isPosting: true, parentCode: '1100' },
+    { code: '1300', name: 'Accounts Receivable', type: AccountType.ASSET, isPosting: false, parentCode: '1000', systemControlled: true },
+    { code: '1400', name: 'Stock Assets', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '1500', name: 'Tax Assets', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '1600', name: 'Loans and Advances', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '1700', name: 'Fixed Assets', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '1800', name: 'Investments', type: AccountType.ASSET, isPosting: true, parentCode: '1000' },
+    { code: '1900', name: 'Temporary Accounts', type: AccountType.ASSET, isPosting: false, parentCode: '1000' },
+    { code: '2000', name: 'Source Of Funds', type: AccountType.LIABILITY, isPosting: false },
+    { code: '2100', name: 'Accounts Payable', type: AccountType.LIABILITY, isPosting: true, parentCode: '2000', systemControlled: true },
+    { code: '2200', name: 'Tax Liabilities', type: AccountType.LIABILITY, isPosting: false, parentCode: '2000' },
+    { code: '3000', name: 'Equity', type: AccountType.EQUITY, isPosting: false },
+    { code: '3999', name: 'Opening Balance Equity', type: AccountType.EQUITY, isPosting: true, parentCode: '3000', systemControlled: true },
+    { code: '4000', name: 'Income', type: AccountType.INCOME, isPosting: false },
+    { code: '4100', name: 'Sales Revenue', type: AccountType.REVENUE, isPosting: true, parentCode: '4000' },
+    { code: '5000', name: 'Expenses', type: AccountType.EXPENSE, isPosting: false },
+    { code: '5100', name: 'Operating Expense', type: AccountType.EXPENSE, isPosting: true, parentCode: '5000' },
+];
+
+const sanitizeImportRow = (row: ImportAccountRowDTO | StarterChartTemplateRow) => ({
+    code: row.code.trim().toUpperCase(),
+    name: row.name.trim(),
+    type: row.type,
+    parentCode: row.parentCode?.trim().toUpperCase() || null,
+    isPosting: Boolean(row.isPosting),
+    isActive: row.isActive ?? true,
+    description: row.description?.trim() || undefined,
+    systemControlled: 'systemControlled' in row ? Boolean(row.systemControlled) : false,
+});
+
+async function getStarterTemplateRows(): Promise<StarterChartTemplateRow[]> {
+    const demoAccounts = await ChartOfAccount.find({ tenantId: 'tenant_demo' }).sort({ code: 1 }).lean();
+    if (!demoAccounts.length) {
+        return defaultStarterTemplate;
+    }
+
+    const codeById = new Map(demoAccounts.map((account: any) => [account._id.toString(), account.code]));
+    return demoAccounts.map((account: any) => ({
+        code: account.code,
+        name: account.name,
+        type: account.type,
+        isPosting: Boolean(account.isPosting),
+        isActive: Boolean(account.isActive),
+        description: account.description,
+        systemControlled: Boolean(account.systemControlled),
+        parentCode: account.parentId ? codeById.get(account.parentId.toString()) || null : null,
+    }));
+}
+
+async function applyAccountTemplateRows(tenantId: string, rows: Array<ImportAccountRowDTO | StarterChartTemplateRow>, mode: 'create' | 'upsert' = 'upsert') {
+    const normalizedRows = rows.map(sanitizeImportRow);
+    const seenCodes = new Set<string>();
+
+    for (const row of normalizedRows) {
+        if (seenCodes.has(row.code)) {
+            throw new ServiceError(`Duplicate account code in import/template: ${row.code}`, 'CONFLICT');
+        }
+        seenCodes.add(row.code);
+    }
+
+    const existingAccounts = await ChartOfAccount.find({ tenantId }).lean();
+    const existingByCode = new Map(existingAccounts.map((account: any) => [account.code, account]));
+    const stagedByCode = new Map<string, any>();
+    const pending = [...normalizedRows];
+    let progress = true;
+
+    while (pending.length > 0 && progress) {
+        progress = false;
+
+        for (let index = pending.length - 1; index >= 0; index -= 1) {
+            const row = pending[index];
+            const parent = row.parentCode
+                ? stagedByCode.get(row.parentCode) || existingByCode.get(row.parentCode)
+                : null;
+
+            if (row.parentCode && !parent) {
+                continue;
+            }
+
+            if (parent && parent.isPosting) {
+                throw new ServiceError(`Parent account ${row.parentCode} must be a header/folder account`, 'VALIDATION_ERROR');
+            }
+
+            const level = parent ? parent.level + 1 : 0;
+            const path = parent ? `${parent.path}/${row.code}` : `${row.type}/${row.code}`;
+            const normalBalance = deriveNormalBalance(row.type);
+            const existing = existingByCode.get(row.code);
+
+            if (existing) {
+                if (mode === 'create') {
+                    throw new ServiceError(`Account with code ${row.code} already exists`, 'CONFLICT');
+                }
+
+                const updated = await ChartOfAccount.findOneAndUpdate(
+                    { _id: existing._id, tenantId },
+                    {
+                        $set: {
+                            name: row.name,
+                            type: row.type,
+                            description: row.description,
+                            isPosting: row.isPosting,
+                            isActive: row.isActive,
+                            parentId: parent?._id || null,
+                            level,
+                            path,
+                            normalBalance,
+                            systemControlled: row.systemControlled || existing.systemControlled,
+                        },
+                    },
+                    { new: true }
+                ).lean();
+
+                existingByCode.set(row.code, updated);
+                stagedByCode.set(row.code, updated);
+            } else {
+                const created = await ChartOfAccount.create({
+                    tenantId,
+                    code: row.code,
+                    name: row.name,
+                    type: row.type,
+                    description: row.description,
+                    isPosting: row.isPosting,
+                    isActive: row.isActive,
+                    parentId: parent?._id || null,
+                    level,
+                    path,
+                    normalBalance,
+                    systemControlled: row.systemControlled,
+                });
+
+                const leanCreated = created.toObject();
+                existingByCode.set(row.code, leanCreated);
+                stagedByCode.set(row.code, leanCreated);
+            }
+
+            pending.splice(index, 1);
+            progress = true;
+        }
+    }
+
+    if (pending.length > 0) {
+        throw new ServiceError(
+            `Some accounts could not be processed because their parents are missing: ${pending.map((row) => `${row.code} -> ${row.parentCode}`).join(', ')}`,
+            'VALIDATION_ERROR'
+        );
+    }
+}
+
+export const createStarterChart = async (tenantId: string) => {
+    const existingCount = await ChartOfAccount.countDocuments({ tenantId });
+    if (existingCount > 0) {
+        throw new ServiceError('Chart of Accounts already contains records for this tenant', 'CONFLICT');
+    }
+
+    const templateRows = await getStarterTemplateRows();
+    await applyAccountTemplateRows(tenantId, templateRows, 'create');
+    return getAccountTree(tenantId);
+};
+
+export const importAccounts = async (tenantId: string, rows: ImportAccountRowDTO[]) => {
+    await applyAccountTemplateRows(tenantId, rows, 'upsert');
+    return getAccountTree(tenantId);
 };

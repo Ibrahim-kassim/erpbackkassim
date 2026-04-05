@@ -11,7 +11,7 @@ import { Product } from '../models/inventory/product.model';
 import { Uom } from '../models/inventory/uom.model';
 import { PurchaseOrder } from '../models/purchaseOrder.model';
 import { RFQ } from '../models/rfq.model';
-import { listAccounts } from './chartOfAccount.service';
+import { getAccountTree } from './chartOfAccount.service';
 
 export type CopilotModuleKey =
     | 'BUSINESS_PARTNERS'
@@ -79,6 +79,28 @@ const monthLabel = (value?: Date | string | null) => {
     if (Number.isNaN(date.getTime())) return 'Unknown';
     return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 };
+
+function flattenChartAccountTree(nodes: any[], depth = 0): Array<{
+    code: string;
+    name: string;
+    type: string;
+    isPosting: boolean;
+    isActive: boolean;
+    depth: number;
+}> {
+    return (nodes || []).flatMap((node) => {
+        const current = {
+            code: node.code,
+            name: node.name,
+            type: node.type,
+            isPosting: Boolean(node.isPosting),
+            isActive: Boolean(node.isActive),
+            depth,
+        };
+
+        return [current, ...flattenChartAccountTree(node.children || [], depth + 1)];
+    });
+}
 
 const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 
@@ -514,24 +536,25 @@ export async function getCopilotModuleSummary(tenantId: string, moduleKey: Copil
             };
         }
         case 'CHART_ACCOUNTS': {
-            const query = {
-                type: filters?.accountType,
-                isActive: filters?.status === 'ACTIVE' ? 'true' : filters?.status === 'INACTIVE' ? 'false' : undefined,
-                isPosting: typeof filters?.posting === 'boolean' ? String(filters.posting) : undefined,
-            };
-            const accounts = await listAccounts(query, tenantId);
-            const rows = accounts.slice(0, 12) as any[];
+            const tree = await getAccountTree(tenantId);
+            const accounts = flattenChartAccountTree(tree).filter((account) => {
+                if (filters?.accountType && account.type !== filters.accountType) return false;
+                if (filters?.status === 'ACTIVE' && !account.isActive) return false;
+                if (filters?.status === 'INACTIVE' && account.isActive) return false;
+                if (typeof filters?.posting === 'boolean' && account.isPosting !== filters.posting) return false;
+                return true;
+            });
             const total = accounts.length;
-            const posting = accounts.filter((account: any) => account.isPosting).length;
-            const headers = accounts.filter((account: any) => !account.isPosting).length;
-            const active = accounts.filter((account: any) => account.isActive).length;
+            const posting = accounts.filter((account) => account.isPosting).length;
+            const headers = accounts.filter((account) => !account.isPosting).length;
+            const active = accounts.filter((account) => account.isActive).length;
             return {
                 moduleKey,
                 title: 'Chart of Accounts',
                 summary: `You have ${total} chart account record(s). ${posting} are posting accounts, ${headers} are header/folder accounts, and ${active} are active. ${describeAppliedFilters(moduleKey, filters)}`.trim(),
                 facts: [`Total: ${total}`, `Posting: ${posting}`, `Headers: ${headers}`, `Active: ${active}`],
                 columns: ['Code', 'Name', 'Type', 'Posting', 'Active'],
-                rows: rows.map((row: any) => [row.code, row.name, row.type, row.isPosting ? 'Yes' : 'No', row.isActive ? 'Yes' : 'No']),
+                rows: accounts.map((row) => [`${'  '.repeat(row.depth)}${row.code}`, row.name, row.type, row.isPosting ? 'Yes' : 'No', row.isActive ? 'Yes' : 'No']),
             };
         }
         case 'FISCAL_YEARS': {

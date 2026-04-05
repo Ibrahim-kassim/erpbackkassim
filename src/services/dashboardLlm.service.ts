@@ -297,6 +297,55 @@ function sanitizeClassification(output: PromptClassification | null | undefined)
     return next;
 }
 
+function applyDeterministicIntentOverrides(
+    message: string,
+    conversationContext: string,
+    classification: PromptClassification,
+): PromptClassification {
+    const normalized = message.toLowerCase();
+    const contextualModuleKey =
+        classification.moduleKey
+        || resolveModuleKeyFallback(message)
+        || resolveModuleKeyFallback(conversationContext);
+
+    const wantsSpreadsheet = /(csv|excel|spreadsheet|xlsx|sheet|download)/.test(normalized);
+    const wantsPdf = /\bpdf\b/.test(normalized);
+    const wantsChart = /(draw|plot|graph|chart|tree|hierarchy|structure)/.test(normalized);
+
+    if (wantsSpreadsheet) {
+        return {
+            intent: 'PREVIEW_CSV',
+            previewKey: classification.previewKey || 'dashboard_overview',
+            moduleKey: contextualModuleKey,
+        };
+    }
+
+    if (wantsPdf) {
+        return {
+            intent: 'PREVIEW_PDF',
+            previewKey: classification.previewKey || 'payables_risk_summary',
+            moduleKey: contextualModuleKey,
+        };
+    }
+
+    if (wantsChart && classification.intent === 'ASK') {
+        return {
+            intent: 'DRAW_CHART',
+            chartKey: classification.chartKey || 'cash_flow',
+            moduleKey: contextualModuleKey,
+        };
+    }
+
+    if (!classification.moduleKey && contextualModuleKey && classification.intent !== 'NAVIGATE') {
+        return {
+            ...classification,
+            moduleKey: contextualModuleKey,
+        };
+    }
+
+    return classification;
+}
+
 export async function classifyDashboardPrompt(message: string, workflowSummary = '', conversationContext = ''): Promise<PromptClassification> {
     const fallback = classifyDashboardPromptFallback(message, conversationContext);
 
@@ -313,9 +362,10 @@ export async function classifyDashboardPrompt(message: string, workflowSummary =
             ].join('\n')
         );
 
-        return sanitizeClassification(result.output) || fallback;
+        const sanitized = sanitizeClassification(result.output) || fallback;
+        return applyDeterministicIntentOverrides(message, conversationContext, sanitized);
     } catch {
-        return fallback;
+        return applyDeterministicIntentOverrides(message, conversationContext, fallback);
     }
 }
 

@@ -22,5 +22,20 @@ export const updateAccountSchema = z.object({
     type: z.nativeEnum(AccountType).optional(),
 });
 
+export const importAccountRowSchema = z.object({
+    code: z.string().min(1).regex(codeRegex, "Code must contain only uppercase letters, numbers, dots, or dashes"),
+    name: z.string().min(1),
+    type: z.nativeEnum(AccountType),
+    parentCode: z.string().regex(codeRegex, "Parent code must contain only uppercase letters, numbers, dots, or dashes").optional().nullable(),
+    isPosting: z.boolean().default(true),
+    isActive: z.boolean().default(true),
+    description: z.string().optional().nullable(),
+});
+
+export const importAccountsSchema = z.object({
+    accounts: z.array(importAccountRowSchema).min(1, 'At least one account row is required'),
+});
+
 export type CreateAccountDTO = z.infer<typeof createAccountSchema>;
 export type UpdateAccountDTO = z.infer<typeof updateAccountSchema>;
+export type ImportAccountRowDTO = z.infer<typeof importAccountRowSchema>;
