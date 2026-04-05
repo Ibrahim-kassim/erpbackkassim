@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { createBusinessPartnerSchema, updateBusinessPartnerSchema } from '../validators/businessPartner.schema';
+import { createBusinessPartnerSchema, importBusinessPartnersSchema, updateBusinessPartnerSchema } from '../validators/businessPartner.schema';
 import * as service from '../services/businessPartner.service';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -42,6 +42,21 @@ export const getOne = asyncHandler(async (req: Request, res: Response) => {
 
 export const getAll = asyncHandler(async (req: Request, res: Response) => {
     const data = await service.getBusinessPartners(req.query, req.tenantId!);
+    res.status(200).json({ data });
+});
+
+export const importRows = asyncHandler(async (req: Request, res: Response) => {
+    const validation = importBusinessPartnersSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid import payload',
+            details: validation.error.format()
+        });
+        return;
+    }
+
+    const data = await service.importBusinessPartners(validation.data.rows, req.tenantId!);
     res.status(200).json({ data });
 });
 

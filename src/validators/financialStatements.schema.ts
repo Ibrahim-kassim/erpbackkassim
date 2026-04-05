@@ -7,7 +7,8 @@ export const financialStatementsQuerySchema = z.object({
     from: z.string().optional(),
     to: z.string().optional(), // YYYY-MM-DD
     view: z.enum(['TREE', 'FLAT']).optional().default('TREE'),
-    includeZero: z.string().transform(val => val === 'true').optional().default('false')
+    includeZero: z.string().transform((val) => val === 'true').optional().default('false'),
+    includeInactive: z.string().transform((val) => val === 'true').optional().default('false'),
 });
 
 export type FinancialStatementsQuery = z.infer<typeof financialStatementsQuerySchema>;

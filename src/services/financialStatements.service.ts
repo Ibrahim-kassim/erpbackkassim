@@ -15,7 +15,13 @@ interface StatementNode {
 
 interface FinancialStatementsResult {
     meta: {
-        scope: any;
+        scope: {
+            label: string;
+            fiscalYearId?: string;
+            fiscalPeriodId?: string;
+            startDate: Date;
+            endDate: Date;
+        };
         totals: {
             assets: number;
             liabilities: number;
@@ -48,6 +54,7 @@ export class FinancialStatementsService {
         // 1. Determine Dates
         let startDate: Date;
         let endDate: Date;
+        let scopeLabel = 'Current Period';
 
         if (query.fiscalPeriodId) {
             const calendar = await FiscalCalendar.findOne({
@@ -62,10 +69,25 @@ export class FinancialStatementsService {
             }
             startDate = period.startDate;
             endDate = period.endDate;
+            scopeLabel = period.label || 'Selected Period';
+        } else if (query.fiscalYearId) {
+            const fiscalYear = await FiscalCalendar.findOne({
+                tenantId,
+                _id: new Types.ObjectId(query.fiscalYearId)
+            });
+
+            if (!fiscalYear) {
+                throw new Error('Fiscal Year not found');
+            }
+
+            startDate = fiscalYear.startDate;
+            endDate = fiscalYear.endDate;
+            scopeLabel = fiscalYear.yearName || 'Selected Fiscal Year';
         } else if (query.from && query.to) {
             startDate = new Date(query.from);
             endDate = new Date(query.to);
             endDate.setHours(23, 59, 59, 999);
+            scopeLabel = 'Date Range';
         } else if (query.asOf) {
             startDate = new Date(0); // Beginning of time for Balance Sheet, but for IS?
             // If only asOf is provided, we usually assume YTD or inception-to-date.
@@ -86,15 +108,20 @@ export class FinancialStatementsService {
 
             endDate = new Date(query.asOf);
             endDate.setHours(23, 59, 59, 999);
+            scopeLabel = 'As Of Date';
         } else {
             // Default to current month
             const now = new Date();
             startDate = new Date(now.getFullYear(), now.getMonth(), 1);
             endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+            scopeLabel = 'Current Period';
         }
 
         // 2. Fetch Accounts
-        const allAccounts = await ChartOfAccount.find({ tenantId }).lean();
+        const allAccounts = await ChartOfAccount.find({
+            tenantId,
+            ...(query.includeInactive ? {} : { isActive: true })
+        }).lean();
 
         // 3. Aggregation
         // BS needs Closing Balances (All Time).
@@ -333,7 +360,13 @@ export class FinancialStatementsService {
 
         return {
             meta: {
-                scope: { ...query, startDate, endDate },
+                scope: {
+                    label: scopeLabel,
+                    fiscalYearId: query.fiscalYearId,
+                    fiscalPeriodId: query.fiscalPeriodId,
+                    startDate,
+                    endDate
+                },
                 totals,
                 balanced,
                 difference

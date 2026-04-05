@@ -298,7 +298,15 @@ export const listEntries = async (query: any, tenantId: string) => {
     const filter: any = { tenantId };
 
     // Status filter
-    if (query.status) filter.status = query.status;
+    if (query.status) {
+        const rawStatuses: string[] = Array.isArray(query.status) ? query.status.map(String) : String(query.status).split(',');
+        const statuses = rawStatuses.map((status: string) => String(status).trim()).filter(Boolean);
+        if (statuses.length === 1) {
+            filter.status = statuses[0];
+        } else if (statuses.length > 1) {
+            filter.status = { $in: statuses };
+        }
+    }
     if (query.sourceType) filter.sourceType = query.sourceType;
     if (query.fiscalPeriodId) filter.fiscalPeriodId = query.fiscalPeriodId;
 

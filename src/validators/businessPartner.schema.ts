@@ -6,7 +6,6 @@ export const createBusinessPartnerSchema = z.object({
     roles: z.array(z.enum(['CUSTOMER', 'VENDOR'])).min(1, 'At least one role is required'),
     currency: z.string().optional().default('USD'),
     status: z.enum(['ACTIVE', 'INACTIVE']).optional().default('ACTIVE'),
-    taxNumber: z.string().optional(),
     email: z.string().email().optional().or(z.literal('')),
     phone: z.string().optional(),
     address: z.object({
@@ -15,8 +14,7 @@ export const createBusinessPartnerSchema = z.object({
         street: z.string().optional(),
         postalCode: z.string().optional()
     }).optional(),
-    paymentTerms: z.string().optional(),
-    creditLimit: z.number().min(0).optional()
+    paymentTerms: z.string().optional()
 });
 
 export const updateBusinessPartnerSchema = z.object({
@@ -25,7 +23,6 @@ export const updateBusinessPartnerSchema = z.object({
     roles: z.array(z.enum(['CUSTOMER', 'VENDOR'])).min(1).optional(),
     currency: z.string().optional(),
     status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
-    taxNumber: z.string().optional(),
     email: z.string().email().optional().or(z.literal('')),
     phone: z.string().optional(),
     address: z.object({
@@ -34,9 +31,29 @@ export const updateBusinessPartnerSchema = z.object({
         street: z.string().optional(),
         postalCode: z.string().optional()
     }).optional(),
-    paymentTerms: z.string().optional(),
-    creditLimit: z.number().min(0).optional()
+    paymentTerms: z.string().optional()
+});
+
+export const importBusinessPartnerRowSchema = z.object({
+    name: z.string().min(1, 'Name is required'),
+    roles: z.array(z.enum(['CUSTOMER', 'VENDOR'])).min(1, 'At least one role is required'),
+    currency: z.string().optional().default('USD'),
+    status: z.enum(['ACTIVE', 'INACTIVE']).optional().default('ACTIVE'),
+    email: z.string().email().optional().or(z.literal('')),
+    phone: z.string().optional(),
+    address: z.object({
+        country: z.string().optional(),
+        city: z.string().optional(),
+        street: z.string().optional(),
+        postalCode: z.string().optional()
+    }).optional(),
+    paymentTerms: z.string().optional()
+});
+
+export const importBusinessPartnersSchema = z.object({
+    rows: z.array(importBusinessPartnerRowSchema).min(1, 'At least one row is required')
 });
 
 export type CreateBusinessPartnerDTO = z.infer<typeof createBusinessPartnerSchema>;
 export type UpdateBusinessPartnerDTO = z.infer<typeof updateBusinessPartnerSchema>;
+export type ImportBusinessPartnerRowDTO = z.infer<typeof importBusinessPartnerRowSchema>;

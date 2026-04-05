@@ -4,6 +4,7 @@ import * as controller from '../controllers/businessPartner.controller';
 const router = Router();
 
 router.get('/', controller.getAll);
+router.post('/import', controller.importRows);
 router.get('/:id', controller.getOne);
 router.post('/', controller.create);
 router.put('/:id', controller.update);

@@ -1,6 +1,7 @@
 import mongoose, { Types } from 'mongoose';
 import { JournalEntry, EntryStatus } from '../models/journalEntry.model';
 import { ChartOfAccount, NormalBalance } from '../models/chartOfAccount.model';
+import { FiscalCalendar } from '../models/fiscalCalendar.model';
 import { TrialBalanceQuery } from '../validators/trialBalance.schema';
 
 interface TrialBalanceLine {
@@ -30,6 +31,66 @@ interface TrialBalanceResult {
 }
 
 export class TrialBalanceService {
+    private matchesSearch(value: string, search?: string) {
+        if (!search) return true;
+        return value.toLowerCase().includes(search.toLowerCase());
+    }
+
+    private matchesFlatFilters(line: any, query: TrialBalanceQuery) {
+        if (query.accountType && line.type !== query.accountType) return false;
+        if (query.search) {
+            const haystack = `${line.code} ${line.name}`.trim();
+            if (!this.matchesSearch(haystack, query.search)) return false;
+        }
+        if (!query.includeNonPosting && !line.isPosting) return false;
+        if (!query.includeZero && line.closingDr === 0 && line.closingCr === 0) return false;
+        return true;
+    }
+
+    private filterHierarchicalNodes(nodes: any[], query: TrialBalanceQuery): any[] {
+        return nodes.reduce<any[]>((acc, node) => {
+            const filteredChildren = node.children?.length
+                ? this.filterHierarchicalNodes(node.children, query)
+                : [];
+            const matchesType = !query.accountType || node.type === query.accountType;
+            const matchesSearch = !query.search || this.matchesSearch(`${node.code} ${node.name}`, query.search);
+            const matchesPosting = query.includeNonPosting || node.isPosting || filteredChildren.length > 0;
+            const hasNonZeroBalance =
+                Math.abs(node.openingDr || 0) +
+                Math.abs(node.openingCr || 0) +
+                Math.abs(node.debit || 0) +
+                Math.abs(node.credit || 0) +
+                Math.abs(node.closingDr || 0) +
+                Math.abs(node.closingCr || 0) >
+                0.001;
+            const matchesZero = query.includeZero || filteredChildren.length > 0 || hasNonZeroBalance;
+            const shouldKeep = matchesType && matchesSearch && matchesPosting && matchesZero;
+
+            if (shouldKeep || filteredChildren.length > 0) {
+                acc.push({
+                    ...node,
+                    children: filteredChildren,
+                });
+            }
+
+            return acc;
+        }, []);
+    }
+
+    private calculateHierarchicalTotals(nodes: any[]) {
+        return nodes.reduce(
+            (totals, node) => {
+                totals.openingDr += node.openingDr || 0;
+                totals.openingCr += node.openingCr || 0;
+                totals.debit += node.debit || 0;
+                totals.credit += node.credit || 0;
+                totals.closingDr += node.closingDr || 0;
+                totals.closingCr += node.closingCr || 0;
+                return totals;
+            },
+            { openingDr: 0, openingCr: 0, debit: 0, credit: 0, closingDr: 0, closingCr: 0 }
+        );
+    }
 
     async generateReport(tenantId: string, query: TrialBalanceQuery): Promise<TrialBalanceResult> {
         const matchStage: any = {
@@ -98,15 +159,15 @@ export class TrialBalanceService {
         const rawResults = await JournalEntry.aggregate(aggregation as any[]);
 
         // Process results in JS for cleaner logic on "closing" and filtering
-        let lines: TrialBalanceLine[] = rawResults.map(r => {
+        let lines: any[] = rawResults.map(r => {
             const net = r.debitTotal - r.creditTotal;
-            let closingDebit = 0;
-            let closingCredit = 0;
+            let closingDr = 0;
+            let closingCr = 0;
 
             if (net > 0) {
-                closingDebit = net;
+                closingDr = net;
             } else if (net < 0) {
-                closingCredit = Math.abs(net);
+                closingCr = Math.abs(net);
             }
 
             // Normal Balance Check
@@ -122,10 +183,16 @@ export class TrialBalanceService {
                 name: r.name,
                 type: r.type,
                 normalBalance: r.normalBalance,
+                openingDr: 0,
+                openingCr: 0,
+                debit: r.debitTotal,
+                credit: r.creditTotal,
                 debitTotal: r.debitTotal,
                 creditTotal: r.creditTotal,
-                closingDebit,
-                closingCredit,
+                closingDr,
+                closingCr,
+                closingDebit: closingDr,
+                closingCredit: closingCr,
                 unusualBalance,
                 isPosting: r.isPosting,
                 isActive: r.isActive
@@ -143,7 +210,18 @@ export class TrialBalanceService {
         // If query.includeZero is true, we must fetch ALL accounts and merge.
         // This is a bit more expensive.
         if (query.includeZero) {
-            const allAccounts = await ChartOfAccount.find({ tenantId }).sort({ code: 1 });
+            const accountQuery: any = { tenantId };
+            if (query.accountType) {
+                accountQuery.type = query.accountType;
+            }
+            if (query.search) {
+                accountQuery.$or = [
+                    { code: { $regex: query.search, $options: 'i' } },
+                    { name: { $regex: query.search, $options: 'i' } }
+                ];
+            }
+
+            const allAccounts = await ChartOfAccount.find(accountQuery).sort({ code: 1 });
             const existingMap = new Map(lines.map(l => [l.accountId, l]));
 
             lines = allAccounts.map(acc => {
@@ -157,40 +235,29 @@ export class TrialBalanceService {
                     name: acc.name,
                     type: acc.type,
                     normalBalance: acc.normalBalance,
+                    openingDr: 0,
+                    openingCr: 0,
+                    debit: 0,
+                    credit: 0,
                     debitTotal: 0,
                     creditTotal: 0,
+                    closingDr: 0,
+                    closingCr: 0,
                     closingDebit: 0,
                     closingCredit: 0,
                     unusualBalance: false,
                     isPosting: acc.isPosting,
                     isActive: acc.isActive
-                } as any; // Cast to bypass isPosting check below
+                };
             });
         }
 
-        // Filter valid lines
-        lines = lines.filter(l => {
-            // internal helper property access
-            const isPosting = (l as any).isPosting;
-
-            // exclude non-posting unless requested
-            if (!query.includeNonPosting && !isPosting) return false;
-
-            // exclude zero unless requested (if we didn't just add them back)
-            // If includeZero is false, hide zero lines.
-            // Note: If we added them above, includeZero was true.
-            // So this only applies if includeZero is false loops through original results.
-            if (!query.includeZero) {
-                if (l.closingDebit === 0 && l.closingCredit === 0) return false;
-            }
-
-            return true;
-        });
+        lines = lines.filter((line) => this.matchesFlatFilters(line, query));
 
         // Calculate Totals
         const totals = lines.reduce((acc, curr) => ({
-            debit: acc.debit + curr.closingDebit,
-            credit: acc.credit + curr.closingCredit
+            debit: acc.debit + curr.closingDr,
+            credit: acc.credit + curr.closingCr
         }), { debit: 0, credit: 0 });
 
         // Round totals to 2 decimals
@@ -200,9 +267,6 @@ export class TrialBalanceService {
         const difference = Math.abs(totals.debit - totals.credit);
         const balanced = difference < 0.01;
 
-        // Clean up internal fields (isPosting, isActive) from output if strict
-        const cleanLines = lines.map(({ isPosting, isActive, ...rest }: any) => rest);
-
         return {
             meta: {
                 scope: query,
@@ -210,7 +274,7 @@ export class TrialBalanceService {
                 balanced,
                 difference
             },
-            data: cleanLines
+            data: lines
         };
     }
     async generateHierarchicalReport(tenantId: string, query: TrialBalanceQuery) {
@@ -219,21 +283,13 @@ export class TrialBalanceService {
         let endDate: Date;
 
         if (query.fiscalPeriodId) {
-            const FiscalPeriod = mongoose.model('FiscalPeriod'); // Dynamic import if possible or assume resolved by DI/Lookup? 
-            // Better to perform lookup on FiscalCalendar since periods are embedded now.
-            // But we don't have easy access to services here without circular dependency?
-            // Let's use Mongoose model directly if available or pass in dates? 
-            // query logic usually handled by service.
-
-            // We need to fetch period dates.
-            const { FiscalCalendar } = await import('../models/fiscalCalendar.model');
             const calendar = await FiscalCalendar.findOne({
                 tenantId,
                 "periods._id": new Types.ObjectId(query.fiscalPeriodId)
             });
 
             if (!calendar) throw new Error('Fiscal Period not found');
-            const period = calendar.periods.find(p => p._id.toString() === query.fiscalPeriodId);
+            const period = calendar.periods.find((p) => p._id.toString() === query.fiscalPeriodId);
             if (!period) throw new Error('Fiscal Period not found in calendar');
 
             startDate = period.startDate;
@@ -324,6 +380,7 @@ export class TrialBalanceService {
 
             nodesMap.set(acc._id.toString(), {
                 ...acc,
+                accountId: acc._id.toString(),
                 id: acc._id.toString(),
                 label: `${acc.code} - ${acc.name}`,
                 parentId: acc.parentId ? acc.parentId.toString() : null,
@@ -387,42 +444,9 @@ export class TrialBalanceService {
 
         rootNodes.forEach(rollup);
 
-        // Totals
-        const totals = { openingDr: 0, openingCr: 0, debit: 0, credit: 0, closingDr: 0, closingCr: 0 };
-        rootNodes.forEach(n => {
-            totals.openingDr += n.openingDr;
-            totals.openingCr += n.openingCr;
-            totals.debit += n.debit;
-            totals.credit += n.credit;
-            totals.closingDr += n.closingDr;
-            totals.closingCr += n.closingCr;
-        });
-
-        // Clean nulls or circular structs? JSON stringify handles it if no circular refs.
-        // We need to flatten? Or return Tree?
-        // UI requested Tree.
-        // Let's filter includeZero if needed. 
-        // Recursive filter?
-
-        const filterZero = (nodes: any[]): any[] => {
-            return nodes.filter(n => {
-                if (n.children.length > 0) {
-                    n.children = filterZero(n.children);
-                    // Keep if has children OR has non-zero values
-                    return n.children.length > 0 || Math.abs(n.closingDr) + Math.abs(n.closingCr) > 0.001;
-                }
-                // Leaf
-                return Math.abs(n.closingDr) + Math.abs(n.closingCr) > 0.001 || n.debit !== 0 || n.credit !== 0;
-            });
-        };
-
-        let finalNodes = rootNodes;
-        if (query.includeZero !== true) {
-            finalNodes = filterZero(rootNodes);
-        }
-
-        // Sort roots
+        let finalNodes = this.filterHierarchicalNodes(rootNodes, query);
         finalNodes.sort((a, b) => a.code.localeCompare(b.code));
+        const totals = this.calculateHierarchicalTotals(finalNodes);
 
         return {
             meta: {

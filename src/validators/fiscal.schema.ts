@@ -5,7 +5,8 @@ export const createFiscalYearSchema = z.object({
     startDate: z.string().transform(str => new Date(str)),
     endDate: z.string().transform(str => new Date(str)),
     isActive: z.boolean().optional().default(true),
-    generatePeriods: z.boolean().optional().default(true) // Helper to auto-generate immediately
+    generatePeriods: z.boolean().optional().default(true), // Helper to auto-generate immediately
+    openPeriodNumber: z.number().int().min(1).max(12).optional().default(1)
 }).refine(data => data.endDate > data.startDate, {
     message: "End date must be after start date",
     path: ["endDate"]

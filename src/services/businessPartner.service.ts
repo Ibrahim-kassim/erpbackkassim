@@ -1,12 +1,12 @@
 import { BusinessPartner } from '../models/businessPartner.model';
-import { CreateBusinessPartnerDTO, UpdateBusinessPartnerDTO } from '../validators/businessPartner.schema';
+import { CreateBusinessPartnerDTO, ImportBusinessPartnerRowDTO, UpdateBusinessPartnerDTO } from '../validators/businessPartner.schema';
 
 
 class ServiceError extends Error {
     code: string;
-    details?: any;
+    details?: unknown;
 
-    constructor(message: string, code: string = 'VALIDATION_ERROR', details?: any) {
+    constructor(message: string, code: string = 'VALIDATION_ERROR', details?: unknown) {
         super(message);
         this.code = code;
         this.details = details;
@@ -69,8 +69,16 @@ export const getBusinessPartner = async (id: string, tenantId: string) => {
     return partner;
 };
 
-export const getBusinessPartners = async (query: any, tenantId: string) => {
-    const filter: any = { tenantId, isDeleted: false };
+type BusinessPartnerListQuery = {
+    search?: string;
+    role?: 'CUSTOMER' | 'VENDOR';
+    status?: 'ACTIVE' | 'INACTIVE';
+    page?: string;
+    limit?: string;
+};
+
+export const getBusinessPartners = async (query: BusinessPartnerListQuery, tenantId: string) => {
+    const filter: Record<string, unknown> = { tenantId, isDeleted: false };
 
     // Search
     if (query.search) {
@@ -104,6 +112,47 @@ export const getBusinessPartners = async (query: any, tenantId: string) => {
     ]);
 
     return { data, meta: { total, page, limit, pages: Math.ceil(total / limit) } };
+};
+
+const buildPartnerMatchFilter = (row: ImportBusinessPartnerRowDTO, tenantId: string) => {
+    if (row.email) {
+        return { tenantId, email: row.email, isDeleted: false };
+    }
+
+    return { tenantId, name: row.name, isDeleted: false };
+};
+
+export const importBusinessPartners = async (rows: ImportBusinessPartnerRowDTO[], tenantId: string) => {
+    let created = 0;
+    let updated = 0;
+
+    for (const row of rows) {
+        const existing = await BusinessPartner.findOne(buildPartnerMatchFilter(row, tenantId));
+
+        if (existing) {
+            existing.name = row.name;
+            existing.roles = row.roles;
+            existing.currency = row.currency || existing.currency || 'USD';
+            existing.status = row.status || existing.status;
+            existing.email = row.email || undefined;
+            existing.phone = row.phone || undefined;
+            existing.paymentTerms = row.paymentTerms || undefined;
+            existing.address = row.address || {};
+            existing.isDeleted = false;
+            await existing.save();
+            updated += 1;
+            continue;
+        }
+
+        await createBusinessPartner(row, tenantId);
+        created += 1;
+    }
+
+    return {
+        created,
+        updated,
+        total: rows.length,
+    };
 };
 
 export const updateStatus = async (id: string, status: 'ACTIVE' | 'INACTIVE', tenantId: string) => {

@@ -33,7 +33,10 @@ export class FiscalService {
         });
 
         if (data.generatePeriods) {
-            await this.generatePeriods(tenantId, doc._id.toString(), { mode: 'MONTHLY', openPeriodNumber: 1 });
+            await this.generatePeriods(tenantId, doc._id.toString(), {
+                mode: 'MONTHLY',
+                openPeriodNumber: data.openPeriodNumber || 1
+            });
             return await this.getFiscalYearById(tenantId, doc._id.toString());
         }
 

@@ -64,6 +64,18 @@ export class GeneralLedgerLinesService {
             endDate = period.endDate;
             fiscalYearId = calendar._id.toString();
             scopeLabel = period.label;
+        } else if (query.fiscalYearId) {
+            const calendar = await FiscalCalendar.findOne({
+                _id: new Types.ObjectId(query.fiscalYearId),
+                tenantId,
+            });
+            if (!calendar) throw new Error('Fiscal Year not found');
+
+            startDate = calendar.startDate;
+            endDate = calendar.endDate;
+            fiscalYearId = calendar._id.toString();
+            fiscalPeriodId = undefined;
+            scopeLabel = calendar.yearName;
         } else if (query.from && query.to) {
             startDate = new Date(query.from);
             endDate = new Date(query.to);
@@ -207,7 +219,7 @@ export class GeneralLedgerLinesService {
                     endDate,
                     fiscalPeriodId,
                     fiscalYearId,
-                    scope: query.fiscalPeriodId || query.from ? 'custom' : (query.scope || 'openPeriod'),
+                    scope: query.fiscalPeriodId || query.fiscalYearId || query.from ? 'custom' : (query.scope || 'openPeriod'),
                     label: scopeLabel,
                 },
                 page,
