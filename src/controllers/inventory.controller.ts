@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import * as inventoryService from '../services/inventory.service';
-import { categorySchema, uomSchema, productSchema, updateProductSchema, stockAdjustmentSchema } from '../validators/inventory.schema';
+import {
+    categorySchema,
+    uomSchema,
+    productSchema,
+    updateProductSchema,
+    stockAdjustmentSchema,
+    importProductsSchema,
+} from '../validators/inventory.schema';
 import { asyncHandler } from '../middleware/asyncHandler';
 
 // --- Categories ---
@@ -124,6 +131,21 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
     res.json(products);
 });
 
+export const importProducts = asyncHandler(async (req: Request, res: Response) => {
+    const validatedData = importProductsSchema.safeParse(req.body);
+    if (!validatedData.success) {
+        res.status(400).json({
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid inputs',
+            details: validatedData.error.format(),
+        });
+        return;
+    }
+
+    const result = await inventoryService.importProducts(req.tenantId!, validatedData.data.rows);
+    res.status(201).json(result);
+});
+
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const validatedData = updateProductSchema.safeParse(req.body);
@@ -168,6 +190,7 @@ export const listStock = asyncHandler(async (req: Request, res: Response) => {
     const filters = {
         search: req.query.search as string,
         categoryId: req.query.categoryId as string,
+        status: req.query.status as 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'ALL' | undefined,
         lowStockOnly: req.query.lowStockOnly === 'true',
     };
     const stock = await inventoryService.listStock(req.tenantId!, filters);

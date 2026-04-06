@@ -51,6 +51,34 @@ export const productSchema = baseProductSchema.superRefine((data, ctx) => {
 // For now, simple partial validation is sufficient or we can add refinements if needed.
 export const updateProductSchema = baseProductSchema.partial();
 
+export const importProductRowSchema = z.object({
+    code: z.string().trim().optional(),
+    name: z.string().trim().min(1, 'Name is required'),
+    type: z.enum(['PRODUCT', 'SERVICE']),
+    category: z.string().trim().min(1, 'Category is required'),
+    uom: z.string().trim().min(1, 'Unit of measure is required'),
+    uomSymbol: z.string().trim().optional(),
+    unitPrice: z.coerce.number().min(0, 'Unit Price must be non-negative'),
+    costPrice: z.coerce.number().min(0, 'Cost Price must be non-negative').optional(),
+    vatRate: z.coerce.number().min(0).max(100).default(5),
+    inventoryTracked: z.boolean().optional(),
+    status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+}).superRefine((data, ctx) => {
+    if (data.type === 'PRODUCT' && (data.costPrice === undefined || data.costPrice === null)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Cost Price is required for products',
+            path: ['costPrice'],
+        });
+    }
+});
+
+export const importProductsSchema = z.object({
+    rows: z.array(importProductRowSchema).min(1, 'At least one product row is required'),
+});
+
+export type ImportProductRowDTO = z.infer<typeof importProductRowSchema>;
+
 // Stock Adjustment Schema
 export const stockAdjustmentSchema = z.object({
     type: z.enum(['INCREASE', 'DECREASE']),

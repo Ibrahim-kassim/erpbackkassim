@@ -3,6 +3,29 @@ import { Uom, IUom } from '../models/inventory/uom.model';
 import { Product, IProduct } from '../models/inventory/product.model';
 import { Stock, IStock } from '../models/inventory/stock.model';
 import { Counter } from '../models/counter.model';
+import type { ImportProductRowDTO } from '../validators/inventory.schema';
+
+interface ProductListFilters {
+    search?: string;
+    type?: 'PRODUCT' | 'SERVICE' | 'ALL';
+    categoryId?: string | 'ALL';
+    status?: 'ACTIVE' | 'INACTIVE' | 'ALL';
+}
+
+function normalizeLookup(value: string) {
+    return value.trim().toLowerCase();
+}
+
+type CategoryLookup = {
+    _id: unknown;
+    name: string;
+};
+
+type UomLookup = {
+    _id: unknown;
+    name: string;
+    symbol: string;
+};
 
 // --- Helper: Generate Code ---
 async function getNextSequence(tenantId: string, prefix: string): Promise<string> {
@@ -83,8 +106,8 @@ export async function createProduct(tenantId: string, data: Partial<IProduct>): 
     return product.save();
 }
 
-export async function listProducts(tenantId: string, filters: any = {}): Promise<IProduct[]> {
-    const query: any = { tenantId, isDeleted: false };
+export async function listProducts(tenantId: string, filters: ProductListFilters = {}): Promise<IProduct[]> {
+    const query: Record<string, unknown> = { tenantId, isDeleted: false };
     if (filters.search) {
         const searchRegex = { $regex: filters.search, $options: 'i' };
         query.$or = [{ code: searchRegex }, { name: searchRegex }];
@@ -94,6 +117,83 @@ export async function listProducts(tenantId: string, filters: any = {}): Promise
     if (filters.status && filters.status !== 'ALL') query.status = filters.status;
 
     return Product.find(query).sort({ createdAt: -1 });
+}
+
+export async function importProducts(tenantId: string, rows: ImportProductRowDTO[]) {
+    const categories = await Category.find({ tenantId, isDeleted: false });
+    const uoms = await Uom.find({ tenantId, isDeleted: false });
+
+    const categoryMap = new Map<string, CategoryLookup>(
+        categories.map((category) => [
+            normalizeLookup(category.name),
+            { _id: category._id, name: category.name },
+        ])
+    );
+    const uomMap = new Map(
+        uoms.flatMap((uom) => [
+            [normalizeLookup(uom.name), { _id: uom._id, name: uom.name, symbol: uom.symbol }] as const,
+            [normalizeLookup(uom.symbol), { _id: uom._id, name: uom.name, symbol: uom.symbol }] as const,
+        ])
+    );
+
+    let created = 0;
+    let updated = 0;
+
+    for (const row of rows) {
+        let category = categoryMap.get(normalizeLookup(row.category));
+        if (!category) {
+            const createdCategory = await createCategory(tenantId, { name: row.category, status: 'ACTIVE' });
+            category = { _id: createdCategory._id, name: createdCategory.name };
+            categoryMap.set(normalizeLookup(category.name), category);
+        }
+
+        let uom = uomMap.get(normalizeLookup(row.uom));
+        if (!uom) {
+            const symbol = row.uomSymbol?.trim() || row.uom.trim().slice(0, 5).toUpperCase();
+            const createdUom = await createUom(tenantId, { name: row.uom, symbol, status: 'ACTIVE' });
+            uom = { _id: createdUom._id, name: createdUom.name, symbol: createdUom.symbol };
+            uomMap.set(normalizeLookup(uom.name), uom);
+            uomMap.set(normalizeLookup(uom.symbol), uom);
+        }
+
+        const inventoryTracked = row.type === 'SERVICE'
+            ? false
+            : row.inventoryTracked ?? true;
+        const costPrice = row.type === 'SERVICE'
+            ? 0
+            : row.costPrice ?? 0;
+
+        const payload: Partial<IProduct> = {
+            code: row.code?.trim() || undefined,
+            name: row.name.trim(),
+            type: row.type,
+            categoryId: category._id as IProduct['categoryId'],
+            uomId: uom._id as IProduct['uomId'],
+            unitPrice: row.unitPrice,
+            costPrice,
+            vatRate: row.vatRate ?? 5,
+            inventoryTracked,
+            status: row.status ?? 'ACTIVE',
+        };
+
+        const existing = row.code
+            ? await Product.findOne({ tenantId, code: row.code.trim(), isDeleted: false })
+            : await Product.findOne({ tenantId, name: row.name.trim(), isDeleted: false });
+
+        if (existing) {
+            await Product.findByIdAndUpdate(existing._id, { $set: payload });
+            updated += 1;
+        } else {
+            await createProduct(tenantId, payload);
+            created += 1;
+        }
+    }
+
+    return {
+        total: rows.length,
+        created,
+        updated,
+    };
 }
 
 export async function updateProduct(
@@ -142,15 +242,22 @@ export interface StockItemWithProduct {
     status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
 }
 
+interface StockListFilters {
+    search?: string;
+    categoryId?: string;
+    status?: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'ALL';
+    lowStockOnly?: boolean;
+}
+
 function calculateStockStatus(qty: number): 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' {
     if (qty <= 0) return 'OUT_OF_STOCK';
     if (qty < 10) return 'LOW_STOCK';
     return 'IN_STOCK';
 }
 
-export async function listStock(tenantId: string, filters: any = {}): Promise<StockItemWithProduct[]> {
+export async function listStock(tenantId: string, filters: StockListFilters = {}): Promise<StockItemWithProduct[]> {
     // Build product query
-    const productQuery: any = { tenantId, isDeleted: false, type: 'PRODUCT' }; // Only products, not services
+    const productQuery: Record<string, unknown> = { tenantId, isDeleted: false, type: 'PRODUCT' }; // Only products, not services
 
     if (filters.search) {
         const searchRegex = { $regex: filters.search, $options: 'i' };
@@ -190,7 +297,11 @@ export async function listStock(tenantId: string, filters: any = {}): Promise<St
             continue;
         }
 
-        const categoryName = (product.categoryId as any)?.name || 'Uncategorized';
+        if (filters.status && filters.status !== 'ALL' && status !== filters.status) {
+            continue;
+        }
+
+        const categoryName = (product.categoryId as { name?: string } | null)?.name || 'Uncategorized';
 
         result.push({
             id: stock._id.toString(),

@@ -5,6 +5,7 @@ const router = Router();
 // --- Products ---
 router.post('/products', inventoryController.createProduct);
 router.get('/products', inventoryController.listProducts);
+router.post('/products/import', inventoryController.importProducts);
 router.put('/products/:id', inventoryController.updateProduct);
 router.patch('/products/:id/status', inventoryController.toggleProductStatus);
 router.delete('/products/:id', inventoryController.deleteProduct);
