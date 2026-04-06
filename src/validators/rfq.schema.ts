@@ -22,6 +22,16 @@ export const updateRFQSchema = z.object({
     createdBy: z.string().optional()
 });
 
+export const sendRFQEmailSchema = z.object({
+    vendorIds: z.array(z.string().min(1)).min(1, 'Select at least one vendor'),
+    subject: z.string().min(3, 'Subject is required'),
+    body: z.string().min(10, 'Email body is required'),
+    attachmentFileName: z.string().min(1, 'Attachment file name is required'),
+    attachmentContentBase64: z.string().min(1, 'Attachment is required'),
+    attachmentContentType: z.string().min(1).default('application/pdf'),
+});
+
 export type CreateRFQDTO = z.infer<typeof createRFQSchema>;
 export type UpdateRFQDTO = z.infer<typeof updateRFQSchema>;
 export type RFQItemDTO = z.infer<typeof rfqItemSchema>;
+export type SendRFQEmailDTO = z.infer<typeof sendRFQEmailSchema>;

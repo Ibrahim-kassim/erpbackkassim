@@ -21,6 +21,7 @@ import quotationRoutes from './routes/quotation.route';
 import purchaseOrderRoutes from './routes/purchaseOrder.route';
 import configRoutes from './routes/config.route';
 import grnRoutes from './routes/grn.route';
+import notificationRoutes from './routes/notification.route';
 
 // ── New routes ─────────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.route';
@@ -78,6 +79,7 @@ app.use('/api/v1/quotations', quotationRoutes);
 app.use('/api/v1/purchase-orders', purchaseOrderRoutes);
 app.use('/api/v1/config', configRoutes);
 app.use('/api/v1/grn', grnRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // ── AP / AR routes ─────────────────────────────────────────────────────────────
 app.use('/api/v1/ap/invoices', apInvoiceRoutes);

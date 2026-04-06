@@ -4,6 +4,29 @@ export interface ISystemConfig extends Document {
     tenantId: string;
     companyName?: string;
     companyLogo?: string;
+    documentBranding?: {
+        primaryColor?: string;
+        accentColor?: string;
+        pdfFont?: 'Helvetica' | 'Times' | 'Courier';
+    };
+    emailSettings?: {
+        senderName?: string;
+        senderEmail?: string;
+        replyToEmail?: string;
+        smtpHost?: string;
+        smtpPort?: number;
+        smtpSecure?: boolean;
+        smtpUsername?: string;
+        smtpPassword?: string;
+        inboundEnabled?: boolean;
+        imapHost?: string;
+        imapPort?: number;
+        imapSecure?: boolean;
+        imapUsername?: string;
+        imapPassword?: string;
+        imapFolder?: string;
+        lastInboxSyncAt?: Date;
+    };
     address?: {
         country?: string;
         city?: string;
@@ -39,6 +62,33 @@ const SystemConfigSchema = new Schema<ISystemConfig>(
         tenantId: { type: String, required: true, unique: true, index: true },
         companyName: { type: String },
         companyLogo: { type: String },
+        documentBranding: {
+            primaryColor: { type: String, default: '#1f3b68' },
+            accentColor: { type: String, default: '#0ea5e9' },
+            pdfFont: {
+                type: String,
+                enum: ['Helvetica', 'Times', 'Courier'],
+                default: 'Helvetica',
+            },
+        },
+        emailSettings: {
+            senderName: { type: String },
+            senderEmail: { type: String },
+            replyToEmail: { type: String },
+            smtpHost: { type: String },
+            smtpPort: { type: Number, default: 587 },
+            smtpSecure: { type: Boolean, default: false },
+            smtpUsername: { type: String },
+            smtpPassword: { type: String },
+            inboundEnabled: { type: Boolean, default: false },
+            imapHost: { type: String },
+            imapPort: { type: Number, default: 993 },
+            imapSecure: { type: Boolean, default: true },
+            imapUsername: { type: String },
+            imapPassword: { type: String },
+            imapFolder: { type: String, default: 'INBOX' },
+            lastInboxSyncAt: { type: Date },
+        },
         address: {
             country: { type: String },
             city: { type: String },

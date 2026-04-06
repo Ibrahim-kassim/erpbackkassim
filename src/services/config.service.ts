@@ -52,6 +52,18 @@ export const updateConfig = async (tenantId: string, dto: UpdateSystemConfigDTO)
 
     if (dto.companyName !== undefined) config.companyName = dto.companyName;
     if (dto.companyLogo !== undefined) config.companyLogo = dto.companyLogo;
+    if (dto.documentBranding !== undefined) {
+        config.documentBranding = {
+            ...(config.documentBranding || {}),
+            ...dto.documentBranding,
+        };
+    }
+    if (dto.emailSettings !== undefined) {
+        config.emailSettings = {
+            ...(config.emailSettings || {}),
+            ...dto.emailSettings,
+        };
+    }
     if (dto.address !== undefined) {
         config.address = {
             ...(config.address || {}),

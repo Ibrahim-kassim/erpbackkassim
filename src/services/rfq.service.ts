@@ -1,7 +1,10 @@
 import { RFQ, IRFQ } from '../models/rfq.model';
 import { BusinessPartner } from '../models/businessPartner.model';
 import { Counter } from '../models/counter.model';
-import { CreateRFQDTO, UpdateRFQDTO } from '../validators/rfq.schema';
+import { SystemConfig } from '../models/systemConfig.model';
+import { RFQEmailReply } from '../models/rfqEmailReply.model';
+import { sendConfiguredMail } from './mail.service';
+import { CreateRFQDTO, SendRFQEmailDTO, UpdateRFQDTO } from '../validators/rfq.schema';
 
 class ServiceError extends Error {
     code: string;
@@ -150,6 +153,18 @@ export const getRFQById = async (id: string, tenantId: string): Promise<IRFQ> =>
     return rfq;
 };
 
+export const getRFQEmailReplies = async (id: string, tenantId: string) => {
+    const rfq = await RFQ.findOne({ _id: id, tenantId, isDeleted: false }).select('_id');
+    if (!rfq) {
+        throw new ServiceError('RFQ not found', 'NOT_FOUND');
+    }
+
+    return RFQEmailReply.find({ tenantId, rfqId: rfq._id })
+        .populate('vendorId', 'code name email')
+        .sort({ receivedAt: -1 })
+        .lean();
+};
+
 export const sendRFQ = async (id: string, tenantId: string): Promise<IRFQ> => {
     const rfq = await RFQ.findOne({ _id: id, tenantId, isDeleted: false });
     if (!rfq) {
@@ -163,6 +178,95 @@ export const sendRFQ = async (id: string, tenantId: string): Promise<IRFQ> => {
 
     rfq.status = 'SENT';
     return await rfq.save();
+};
+
+export const sendRFQEmails = async (
+    id: string,
+    dto: SendRFQEmailDTO,
+    tenantId: string,
+): Promise<{
+    rfq: IRFQ;
+    summary: {
+        sentCount: number;
+        failedCount: number;
+        failures: Array<{ vendorId: string; vendorName: string; email?: string; error: string }>;
+    };
+}> => {
+    const [rfq, config] = await Promise.all([
+        RFQ.findOne({ _id: id, tenantId, isDeleted: false }),
+        SystemConfig.findOne({ tenantId }),
+    ]);
+
+    if (!rfq) {
+        throw new ServiceError('RFQ not found', 'NOT_FOUND');
+    }
+
+    if (!config) {
+        throw new ServiceError('Complete the company and email settings before sending RFQs.', 'VALIDATION_ERROR');
+    }
+
+    const vendors = await BusinessPartner.find({
+        _id: { $in: dto.vendorIds },
+        tenantId,
+        isDeleted: false,
+    });
+
+    if (vendors.length === 0) {
+        throw new ServiceError('No valid vendors were selected for email sending.', 'VALIDATION_ERROR');
+    }
+
+    const failures: Array<{ vendorId: string; vendorName: string; email?: string; error: string }> = [];
+    let sentCount = 0;
+    const subjectWithToken = dto.subject.includes('ERP-RFQ:')
+        ? dto.subject
+        : `${dto.subject} [ERP-RFQ:${rfq.rfqNumber}]`;
+
+    for (const vendor of vendors) {
+        if (!vendor.email) {
+            failures.push({
+                vendorId: vendor._id.toString(),
+                vendorName: vendor.name,
+                error: 'Vendor has no email address configured.',
+            });
+            continue;
+        }
+
+        try {
+            await sendConfiguredMail({
+                config,
+                to: vendor.email,
+                subject: subjectWithToken,
+                body: dto.body,
+                attachment: {
+                    filename: dto.attachmentFileName,
+                    contentBase64: dto.attachmentContentBase64,
+                    contentType: dto.attachmentContentType,
+                },
+            });
+            sentCount += 1;
+        } catch (error) {
+            failures.push({
+                vendorId: vendor._id.toString(),
+                vendorName: vendor.name,
+                email: vendor.email,
+                error: error instanceof Error ? error.message : 'Unable to send email.',
+            });
+        }
+    }
+
+    if (sentCount > 0 && rfq.status === 'DRAFT') {
+        rfq.status = 'SENT';
+        await rfq.save();
+    }
+
+    return {
+        rfq,
+        summary: {
+            sentCount,
+            failedCount: failures.length,
+            failures,
+        },
+    };
 };
 
 export const closeRFQ = async (id: string, tenantId: string): Promise<IRFQ> => {
