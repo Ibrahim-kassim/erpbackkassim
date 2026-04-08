@@ -202,6 +202,22 @@ export const list = async (query: any, tenantId: string) => {
     const filter: any = { tenantId, isDeleted: false };
     if (query.status && query.status !== 'ALL') filter.status = query.status;
     if (query.vendorId) filter.vendorId = new Types.ObjectId(query.vendorId);
+    if (query.method && query.method !== 'ALL') filter.method = query.method;
+
+    if (query.dateFrom || query.dateTo) {
+        filter.postingDate = {};
+        if (query.dateFrom) filter.postingDate.$gte = new Date(`${query.dateFrom}T00:00:00.000Z`);
+        if (query.dateTo) filter.postingDate.$lte = new Date(`${query.dateTo}T23:59:59.999Z`);
+    }
+
+    const minAmount = Number(query.minAmount);
+    const maxAmount = Number(query.maxAmount);
+    if (!Number.isNaN(minAmount) || !Number.isNaN(maxAmount)) {
+        filter.amount = {};
+        if (!Number.isNaN(minAmount)) filter.amount.$gte = minAmount;
+        if (!Number.isNaN(maxAmount)) filter.amount.$lte = maxAmount;
+    }
+
     if (query.search) {
         const regex = { $regex: query.search, $options: 'i' };
         filter.$or = [{ paymentNo: regex }, { vendorName: regex }];

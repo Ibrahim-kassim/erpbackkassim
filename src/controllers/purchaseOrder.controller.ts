@@ -34,8 +34,8 @@ const updatePOSchema = z.object({
 });
 
 export const getAll = asyncHandler(async (req: Request, res: Response) => {
-    const { search, status, dateFrom, dateTo } = req.query as Record<string, string>;
-    const pos = await poService.getAll(req.tenantId!, { search, status, dateFrom, dateTo });
+    const { search, status, dateFrom, dateTo, vendorId, receiptStatus, billingStatus } = req.query as Record<string, string>;
+    const pos = await poService.getAll(req.tenantId!, { search, status, dateFrom, dateTo, vendorId, receiptStatus, billingStatus });
     res.json({ data: pos });
 });
 

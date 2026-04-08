@@ -6,7 +6,9 @@ const router = Router();
 
 // Reporting endpoints
 router.get('/aging', agingController.getAPAging);
+router.get('/aging-reconciliation', agingController.getAPAgingReconciliation);
 router.get('/vendor-statement', agingController.getVendorStatement);
+router.get('/vendor-allocations', agingController.getVendorAllocations);
 
 router.get('/', controller.getAll);
 router.get('/outstanding/:vendorId', controller.getOutstandingBills);
