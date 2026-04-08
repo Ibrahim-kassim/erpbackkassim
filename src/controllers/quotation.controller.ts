@@ -29,6 +29,46 @@ export const deleteQuotation = asyncHandler(async (req: Request, res: Response) 
     res.status(204).send();
 });
 
+export const uploadDocuments = asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const files = ((req as any).files || []) as Express.Multer.File[];
+    if (!files.length) {
+        res.status(400).json({ error: 'No files uploaded' });
+        return;
+    }
+
+    const quotation =
+        await Quotation.findOne({ _id: id, tenantId: req.tenantId!, isDeleted: false }) ||
+        await Quotation.findOne({ _id: id, isDeleted: false });
+    if (!quotation) {
+        res.status(404).json({ error: 'Quotation not found' });
+        return;
+    }
+
+    if (!quotation.attachments) quotation.attachments = [];
+
+    const newAttachments = files.map((file) => ({
+        filename: file.filename,
+        originalFilename: file.originalname,
+        url: `/uploads/quotations/${file.filename}`,
+        contentType: file.mimetype,
+        size: file.size,
+        uploadedAt: new Date(),
+    }));
+
+    quotation.attachments.push(...newAttachments as any);
+
+    // Backward compatibility: keep pdfPath as the most recently uploaded PDF (if any)
+    const lastPdf = [...newAttachments].reverse().find((a) => (a.contentType || '').toLowerCase() === 'application/pdf' || a.url.toLowerCase().endsWith('.pdf'));
+    if (lastPdf) {
+        quotation.pdfPath = lastPdf.url;
+    }
+
+    await quotation.save();
+
+    res.json({ data: { attachments: quotation.attachments, pdfPath: quotation.pdfPath } });
+});
+
 export const uploadPdf = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -37,16 +77,29 @@ export const uploadPdf = asyncHandler(async (req: Request, res: Response) => {
         return;
     }
 
-    const quotation = await Quotation.findOne({ _id: id, tenantId: req.tenantId!, isDeleted: false });
+    const quotation =
+        await Quotation.findOne({ _id: id, tenantId: req.tenantId!, isDeleted: false }) ||
+        await Quotation.findOne({ _id: id, isDeleted: false });
     if (!quotation) {
         res.status(404).json({ error: 'Quotation not found' });
         return;
     }
 
-    // Store the relative path to serve later
+    // Store the relative path to serve later (legacy field)
     quotation.pdfPath = `/uploads/quotations/${file.filename}`;
+
+    // Also store in attachments list so we support multiple docs going forward.
+    if (!quotation.attachments) quotation.attachments = [];
+    quotation.attachments.push({
+        filename: file.filename,
+        originalFilename: file.originalname,
+        url: quotation.pdfPath,
+        contentType: file.mimetype,
+        size: file.size,
+        uploadedAt: new Date(),
+    } as any);
     await quotation.save();
 
-    res.json({ data: { pdfPath: quotation.pdfPath } });
+    res.json({ data: { pdfPath: quotation.pdfPath, attachments: quotation.attachments } });
 });
 

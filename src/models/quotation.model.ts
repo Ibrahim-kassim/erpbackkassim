@@ -6,6 +6,15 @@ export interface IQuotationItem {
     totalPrice: number;
 }
 
+export interface IQuotationAttachment {
+    filename: string; // stored filename on disk
+    originalFilename: string; // user-provided filename
+    url: string; // public URL under /uploads
+    contentType?: string;
+    size?: number;
+    uploadedAt: Date;
+}
+
 export interface IQuotation extends Document {
     tenantId: string;
     rfqId: mongoose.Types.ObjectId;
@@ -14,6 +23,7 @@ export interface IQuotation extends Document {
     total: number;
     status: 'SUBMITTED' | 'APPROVED' | 'REJECTED';
     pdfPath?: string;
+    attachments?: IQuotationAttachment[];
     isDeleted: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -36,6 +46,14 @@ const QuotationSchema: Schema = new Schema(
             default: 'SUBMITTED'
         },
         pdfPath: { type: String },
+        attachments: [{
+            filename: { type: String, required: true },
+            originalFilename: { type: String, required: true },
+            url: { type: String, required: true },
+            contentType: { type: String },
+            size: { type: Number },
+            uploadedAt: { type: Date, default: Date.now },
+        }],
         isDeleted: { type: Boolean, default: false }
     },
     { timestamps: true }

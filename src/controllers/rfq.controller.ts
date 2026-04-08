@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { createRFQSchema, sendRFQEmailSchema, updateRFQSchema } from '../validators/rfq.schema';
+import { createRFQSchema, sendRFQEmailSchema, sendRFQVendorMessageSchema, updateRFQSchema } from '../validators/rfq.schema';
 import * as service from '../services/rfq.service';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -65,6 +65,21 @@ export const sendEmail = asyncHandler(async (req: Request, res: Response) => {
     }
 
     const data = await service.sendRFQEmails(req.params.id, validation.data, req.tenantId!);
+    res.status(200).json({ data });
+});
+
+export const sendVendorMessage = asyncHandler(async (req: Request, res: Response) => {
+    const validation = sendRFQVendorMessageSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid inputs',
+            details: validation.error.format()
+        });
+        return;
+    }
+
+    const data = await service.sendRFQVendorMessage(req.params.id, validation.data, req.tenantId!);
     res.status(200).json({ data });
 });
 

@@ -3,8 +3,10 @@ import { BusinessPartner } from '../models/businessPartner.model';
 import { Counter } from '../models/counter.model';
 import { SystemConfig } from '../models/systemConfig.model';
 import { RFQEmailReply } from '../models/rfqEmailReply.model';
+import { Notification } from '../models/notification.model';
 import { sendConfiguredMail } from './mail.service';
-import { CreateRFQDTO, SendRFQEmailDTO, UpdateRFQDTO } from '../validators/rfq.schema';
+import { randomUUID } from 'crypto';
+import { CreateRFQDTO, SendRFQEmailDTO, SendRFQVendorMessageDTO, UpdateRFQDTO } from '../validators/rfq.schema';
 
 class ServiceError extends Error {
     code: string;
@@ -267,6 +269,95 @@ export const sendRFQEmails = async (
             failures,
         },
     };
+};
+
+export const sendRFQVendorMessage = async (
+    id: string,
+    dto: SendRFQVendorMessageDTO,
+    tenantId: string,
+) => {
+    const [rfq, config, vendor] = await Promise.all([
+        RFQ.findOne({ _id: id, tenantId, isDeleted: false }).select('_id rfqNumber vendorIds status'),
+        SystemConfig.findOne({ tenantId }),
+        BusinessPartner.findOne({ _id: dto.vendorId, tenantId, isDeleted: false }).select('_id name email roles'),
+    ]);
+
+    if (!rfq) {
+        throw new ServiceError('RFQ not found', 'NOT_FOUND');
+    }
+
+    if (!config) {
+        throw new ServiceError('Complete the company and email settings before sending messages.', 'VALIDATION_ERROR');
+    }
+
+    if (!vendor || !vendor.email) {
+        throw new ServiceError('Vendor email is missing. Add an email address to the vendor profile first.', 'VALIDATION_ERROR');
+    }
+
+    const isVendorInvited = rfq.vendorIds.some((vendorId) => vendorId.equals(vendor._id as any));
+    if (!isVendorInvited) {
+        throw new ServiceError('This vendor is not part of the RFQ vendor list.', 'VALIDATION_ERROR');
+    }
+
+    const subjectWithToken = dto.subject.includes('ERP-RFQ:')
+        ? dto.subject
+        : `${dto.subject} [ERP-RFQ:${rfq.rfqNumber}]`;
+
+    const info = await sendConfiguredMail({
+        config,
+        to: vendor.email,
+        subject: subjectWithToken,
+        body: dto.body,
+    });
+
+    const senderEmail = config.emailSettings?.senderEmail || config.email;
+    const senderName = config.emailSettings?.senderName || config.companyName || 'ERP Core';
+    const messageId = (info as any)?.messageId || `smtp-${tenantId}-${randomUUID()}`;
+
+    const record = await RFQEmailReply.create({
+        tenantId,
+        rfqId: rfq._id,
+        vendorId: vendor._id,
+        direction: 'OUTBOUND',
+        messageId,
+        subject: subjectWithToken,
+        fromEmail: String(senderEmail || '').trim(),
+        fromName: senderName,
+        toEmail: vendor.email,
+        toName: vendor.name,
+        bodyText: dto.body,
+        attachments: [],
+        receivedAt: new Date(),
+        isRead: true,
+    });
+
+    // Store the outbound message in notifications as part of the vendor thread, but mark it read.
+    const bodySnippet = dto.body.replace(/\s+/g, ' ').trim().slice(0, 240);
+    await Notification.create({
+        tenantId,
+        type: 'RFQ_VENDOR_MESSAGE_SENT',
+        title: `Message sent to ${vendor.name} for ${rfq.rfqNumber}`,
+        message: bodySnippet || 'Message sent.',
+        href: `/rfqs/${rfq._id}`,
+        isRead: true,
+        metadata: {
+            rfqId: rfq._id.toString(),
+            rfqNumber: rfq.rfqNumber,
+            vendorId: vendor._id.toString(),
+            vendorName: vendor.name,
+            subject: subjectWithToken,
+            fromEmail: String(senderEmail || '').trim(),
+            fromName: senderName,
+            toEmail: vendor.email,
+            toName: vendor.name,
+            direction: 'OUTBOUND',
+            bodySnippet: bodySnippet || undefined,
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    });
+
+    return record.toObject();
 };
 
 export const closeRFQ = async (id: string, tenantId: string): Promise<IRFQ> => {

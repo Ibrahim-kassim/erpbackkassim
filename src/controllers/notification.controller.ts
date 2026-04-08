@@ -23,3 +23,9 @@ export const syncMailbox = asyncHandler(async (req: Request, res: Response) => {
     const data = await syncTenantMailbox(req.tenantId!);
     res.status(200).json({ data });
 });
+
+export const listRFQThread = asyncHandler(async (req: Request, res: Response) => {
+    const limit = Number(req.query.limit || 200);
+    const data = await notificationService.listRFQThreadNotifications(req.tenantId!, req.params.rfqId, limit);
+    res.status(200).json({ data });
+});

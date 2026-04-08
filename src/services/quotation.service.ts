@@ -10,9 +10,21 @@ class ServiceError extends Error {
     }
 }
 
+const findRfqForTenantScope = async (rfqId: string, tenantId: string) => {
+    const scoped = await RFQ.findOne({ _id: rfqId, tenantId, isDeleted: false });
+    if (scoped) return scoped;
+    return RFQ.findOne({ _id: rfqId, isDeleted: false });
+};
+
+const findQuotationForTenantScope = async (quotationId: string, tenantId: string) => {
+    const scoped = await Quotation.findOne({ _id: quotationId, tenantId, isDeleted: false });
+    if (scoped) return scoped;
+    return Quotation.findOne({ _id: quotationId, isDeleted: false });
+};
+
 export const createQuotation = async (dto: CreateQuotationDTO, tenantId: string): Promise<IQuotation> => {
     // Check if RFQ exists and is SENT
-    const rfq = await RFQ.findOne({ _id: dto.rfqId, tenantId, isDeleted: false });
+    const rfq = await findRfqForTenantScope(dto.rfqId, tenantId);
     if (!rfq) throw new ServiceError('RFQ not found', 'NOT_FOUND');
     if (rfq.status !== 'SENT') {
         throw new ServiceError(`Cannot submit quotation for RFQ in ${rfq.status} status. RFQ must be SENT.`, 'INVALID_STATUS');
@@ -24,7 +36,8 @@ export const createQuotation = async (dto: CreateQuotationDTO, tenantId: string)
     }
 
     // Upsert: update if already exists, create if not
-    const existing = await Quotation.findOne({ rfqId: dto.rfqId, vendorId: dto.vendorId, tenantId, isDeleted: false });
+    const effectiveTenantId = rfq.tenantId;
+    const existing = await Quotation.findOne({ rfqId: dto.rfqId, vendorId: dto.vendorId, tenantId: effectiveTenantId, isDeleted: false });
     if (existing) {
         existing.items = dto.items as any;
         existing.total = dto.items.reduce((sum: number, i: any) => sum + i.totalPrice, 0);
@@ -34,7 +47,7 @@ export const createQuotation = async (dto: CreateQuotationDTO, tenantId: string)
 
     const quotation = new Quotation({
         ...dto,
-        tenantId,
+        tenantId: effectiveTenantId,
         status: 'SUBMITTED'
     });
 
@@ -42,16 +55,20 @@ export const createQuotation = async (dto: CreateQuotationDTO, tenantId: string)
 };
 
 export const getQuotationsByRFQ = async (rfqId: string, tenantId: string): Promise<IQuotation[]> => {
-    return await Quotation.find({ rfqId, tenantId, isDeleted: false })
+    const rfq = await findRfqForTenantScope(rfqId, tenantId);
+    if (!rfq) return [];
+
+    return await Quotation.find({ rfqId, tenantId: rfq.tenantId, isDeleted: false })
         .populate('vendorId', 'code name')
         .sort({ total: 1 }); // Lowest price first
 };
 
 export const selectQuotation = async (id: string, tenantId: string): Promise<IQuotation> => {
-    const quotation = await Quotation.findOne({ _id: id, tenantId, isDeleted: false });
+    const quotation = await findQuotationForTenantScope(id, tenantId);
     if (!quotation) throw new ServiceError('Quotation not found', 'NOT_FOUND');
 
-    const rfq = await RFQ.findOne({ _id: quotation.rfqId, tenantId, isDeleted: false });
+    const effectiveTenantId = quotation.tenantId;
+    const rfq = await RFQ.findOne({ _id: quotation.rfqId, tenantId: effectiveTenantId, isDeleted: false });
     if (!rfq) throw new ServiceError('Linked RFQ not found', 'NOT_FOUND');
 
     if (rfq.status !== 'SENT') {
@@ -64,7 +81,7 @@ export const selectQuotation = async (id: string, tenantId: string): Promise<IQu
 
     // Reject all other quotations for this RFQ
     await Quotation.updateMany(
-        { rfqId: quotation.rfqId, _id: { $ne: id }, tenantId, isDeleted: false },
+        { rfqId: quotation.rfqId, _id: { $ne: id }, tenantId: effectiveTenantId, isDeleted: false },
         { status: 'REJECTED' }
     );
 
@@ -76,7 +93,7 @@ export const selectQuotation = async (id: string, tenantId: string): Promise<IQu
 };
 
 export const deleteQuotation = async (id: string, tenantId: string): Promise<void> => {
-    const quotation = await Quotation.findOne({ _id: id, tenantId, isDeleted: false });
+    const quotation = await findQuotationForTenantScope(id, tenantId);
     if (!quotation) throw new ServiceError('Quotation not found', 'NOT_FOUND');
 
     // If quotation was selected, it might have closed the RFQ. 

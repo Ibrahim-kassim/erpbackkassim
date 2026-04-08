@@ -144,6 +144,38 @@ const buildNotificationMessage = (vendorName: string, rfqNumber: string, attachm
     return `${vendorName} replied to ${rfqNumber}.`;
 };
 
+const buildBodySnippet = (value: string) =>
+    String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 240);
+
+const stripQuotedEmail = (value: string) => {
+    const text = String(value || '').replace(/\r\n/g, '\n');
+    const lines = text.split('\n');
+    const kept: string[] = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            kept.push('');
+            continue;
+        }
+
+        // Common Gmail quote markers.
+        if (trimmed.startsWith('>')) break;
+        if (/^On .+ wrote:$/i.test(trimmed)) break;
+        if (/^From:\s/i.test(trimmed)) break;
+        if (/^Sent:\s/i.test(trimmed)) break;
+        if (/^To:\s/i.test(trimmed)) break;
+        if (/^Subject:\s/i.test(trimmed)) break;
+
+        kept.push(line);
+    }
+
+    return kept.join('\n').trim();
+};
+
 export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> => {
     if (activeSyncTenants.has(tenantId)) {
         return { processed: 0, imported: 0, skipped: 0, unmatched: 0 };
@@ -189,17 +221,20 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                     continue;
                 }
 
-                const lookbackStart = new Date();
-                lookbackStart.setDate(lookbackStart.getDate() - RECENT_SYNC_LOOKBACK_DAYS);
+                // Incremental sync: only scan a small recent window. This avoids expensive "scan all unseen" behavior.
+                // Keep a small overlap to avoid missing messages due to timezone/clock quirks.
+                const lookbackStart = config?.emailSettings?.lastInboxSyncAt
+                    ? new Date(new Date(config.emailSettings.lastInboxSyncAt).getTime() - 12 * 60 * 60 * 1000)
+                    : (() => {
+                        const fallback = new Date();
+                        fallback.setDate(fallback.getDate() - Math.min(RECENT_SYNC_LOOKBACK_DAYS, 2));
+                        return fallback;
+                    })();
 
-                const unseenMessages = (await client.search({ seen: false }, { uid: true })) || [];
                 const recentMessages = (await client.search({ since: lookbackStart }, { uid: true })) || [];
-                const candidateUids = Array.from(
-                    new Set([
-                        ...recentMessages.slice(-RECENT_SYNC_MAX_MESSAGES),
-                        ...unseenMessages.slice(-RECENT_SYNC_MAX_MESSAGES),
-                    ]),
-                ).sort((left, right) => left - right);
+                const candidateUids = Array.from(new Set(recentMessages.slice(-RECENT_SYNC_MAX_MESSAGES))).sort(
+                    (left, right) => left - right,
+                );
 
                 for (const uid of candidateUids) {
                     const message = await client.fetchOne(
@@ -299,6 +334,7 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                         tenantId,
                         rfqId: rfq._id,
                         vendorId: vendor?._id,
+                        direction: 'INBOUND',
                         messageId,
                         subject,
                         fromEmail,
@@ -308,11 +344,13 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                         receivedAt: parsed.date || message.internalDate || new Date(),
                     });
 
+                    const bodySnippet = buildBodySnippet(stripQuotedEmail(reply.bodyText || ''));
+
                     await Notification.create({
                         tenantId,
                         type: 'RFQ_VENDOR_REPLY',
                         title: `Vendor reply received for ${rfq.rfqNumber}`,
-                        message: buildNotificationMessage(vendor?.name || fromName || fromEmail, rfq.rfqNumber, attachments.length),
+                        message: bodySnippet || buildNotificationMessage(vendor?.name || fromName || fromEmail, rfq.rfqNumber, attachments.length),
                         href: `/rfqs/${rfq._id}`,
                         metadata: {
                             rfqId: rfq._id.toString(),
@@ -320,7 +358,13 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                             emailReplyId: reply._id.toString(),
                             vendorId: vendor?._id?.toString(),
                             vendorName: vendor?.name || fromName || fromEmail,
+                            subject,
+                            fromEmail,
+                            fromName,
+                            direction: 'INBOUND',
                             attachmentCount: attachments.length,
+                            bodySnippet: bodySnippet || undefined,
+                            attachments: attachments.length ? attachments : undefined,
                         },
                         createdAt: parsed.date || message.internalDate || new Date(),
                         updatedAt: parsed.date || message.internalDate || new Date(),

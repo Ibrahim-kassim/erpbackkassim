@@ -77,7 +77,7 @@ export const sendConfiguredMail = async ({ config, to, subject, body, attachment
     });
 
     try {
-        await transporter.sendMail({
+        return await transporter.sendMail({
             from: `"${settings.senderName}" <${settings.senderEmail}>`,
             to,
             replyTo: settings.replyToEmail,

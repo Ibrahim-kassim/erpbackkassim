@@ -10,6 +10,7 @@ router.post('/', controller.create);
 router.put('/:id', controller.update);
 router.post('/:id/send', controller.send);
 router.post('/:id/send-email', controller.sendEmail);
+router.post('/:id/vendor-message', controller.sendVendorMessage);
 router.post('/:id/close', controller.close);
 router.delete('/:id', controller.remove);
 

@@ -42,6 +42,14 @@ app.use(cors());
 app.use(express.json());
 
 // ── Static uploads ─────────────────────────────────────────────────────────────
+// Allow the frontend (different dev origin) to embed/view uploaded PDFs in <embed>/<iframe>.
+// Keep API routes protected by Helmet defaults; relax only for static uploads.
+app.use('/uploads', (req, res, next) => {
+    res.removeHeader('Cross-Origin-Resource-Policy');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.removeHeader('X-Frame-Options');
+    next();
+});
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // ── Sanitize MongoDB operators from user input ─────────────────────────────────

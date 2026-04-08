@@ -12,10 +12,13 @@ export interface IRFQEmailReply extends Document {
     tenantId: string;
     rfqId: Types.ObjectId;
     vendorId?: Types.ObjectId;
+    direction: 'INBOUND' | 'OUTBOUND';
     messageId: string;
     subject: string;
     fromEmail: string;
     fromName?: string;
+    toEmail?: string;
+    toName?: string;
     bodyText?: string;
     attachments: IRFQEmailReplyAttachment[];
     receivedAt: Date;
@@ -40,10 +43,13 @@ const RFQEmailReplySchema = new Schema<IRFQEmailReply>(
         tenantId: { type: String, required: true, index: true },
         rfqId: { type: Schema.Types.ObjectId, ref: 'RFQ', required: true, index: true },
         vendorId: { type: Schema.Types.ObjectId, ref: 'BusinessPartner' },
+        direction: { type: String, enum: ['INBOUND', 'OUTBOUND'], default: 'INBOUND' },
         messageId: { type: String, required: true },
         subject: { type: String, required: true },
         fromEmail: { type: String, required: true },
         fromName: { type: String },
+        toEmail: { type: String },
+        toName: { type: String },
         bodyText: { type: String },
         attachments: { type: [RFQEmailReplyAttachmentSchema], default: [] },
         receivedAt: { type: Date, required: true, index: true },
