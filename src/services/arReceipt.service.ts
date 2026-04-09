@@ -1,4 +1,7 @@
 import { Types } from 'mongoose';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { randomUUID } from 'crypto';
 import { ARReceipt } from '../models/arReceipt.model';
 import { ARInvoice } from '../models/arInvoice.model';
 import { BusinessPartner } from '../models/businessPartner.model';
@@ -27,6 +30,34 @@ const getNextReceiptNo = async (tenantId: string): Promise<string> => {
     return `ARREC-${ret.seq.toString().padStart(6, '0')}`;
 };
 
+const receiptUploadRoot = path.join(process.cwd(), 'uploads', 'ar-receipts');
+
+const sanitizeFileName = (input: string) => input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-');
+
+const saveReceiptReference = async (
+    tenantId: string,
+    receiptNo: string,
+    fileName: string,
+    contentBase64: string,
+    contentType?: string,
+) => {
+    const tenantDir = path.join(receiptUploadRoot, tenantId);
+    await fs.mkdir(tenantDir, { recursive: true });
+
+    const safeName = sanitizeFileName(fileName || `${receiptNo}-reference`);
+    const filename = `${receiptNo.toLowerCase()}-${randomUUID()}-${safeName}`;
+    const absolutePath = path.join(tenantDir, filename);
+    const buffer = Buffer.from(contentBase64, 'base64');
+    await fs.writeFile(absolutePath, buffer);
+
+    return {
+        filename: fileName,
+        url: `/uploads/ar-receipts/${tenantId}/${filename}`,
+        contentType: contentType || 'application/octet-stream',
+        size: buffer.length,
+    };
+};
+
 const mapReceipt = (r: any) => ({
     id: r._id?.toString() || r.id,
     receiptNo: r.receiptNo,
@@ -51,6 +82,13 @@ const mapReceipt = (r: any) => ({
         allocatedAmount: a.allocatedAmount,
     })),
     journalEntryId: r.journalEntryId?.toString(),
+    journalEntryNo: r.journalEntryNo,
+    referenceDocument: r.referenceDocument ? {
+        filename: r.referenceDocument.filename,
+        url: r.referenceDocument.url,
+        contentType: r.referenceDocument.contentType,
+        size: r.referenceDocument.size,
+    } : undefined,
     createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
     updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
 });
@@ -67,6 +105,16 @@ export const create = async (dto: CreateARReceiptDTO, tenantId: string) => {
 
     let fiscalPeriodId: Types.ObjectId | undefined;
     let fiscalYearId: Types.ObjectId | undefined;
+    const referenceDocument =
+        dto.referenceFileName && dto.referenceFileBase64
+            ? await saveReceiptReference(
+                tenantId,
+                receiptNo,
+                dto.referenceFileName,
+                dto.referenceFileBase64,
+                dto.referenceFileContentType,
+            )
+            : undefined;
     try {
         const resolved = await fiscalService.resolveDate(tenantId, new Date(dto.postingDate));
         if (resolved) {
@@ -98,6 +146,7 @@ export const create = async (dto: CreateARReceiptDTO, tenantId: string) => {
             invoiceNo: a.invoiceNo,
             allocatedAmount: a.allocatedAmount,
         })),
+        referenceDocument,
     });
 
     return mapReceipt(receipt.toObject());
@@ -133,6 +182,15 @@ export const update = async (id: string, dto: UpdateARReceiptDTO, tenantId: stri
             allocatedAmount: a.allocatedAmount,
         }));
         receipt.allocatedAmount = dto.allocations.reduce((s, a) => s + a.allocatedAmount, 0);
+    }
+    if (dto.referenceFileName && dto.referenceFileBase64) {
+        receipt.referenceDocument = await saveReceiptReference(
+            tenantId,
+            receipt.receiptNo,
+            dto.referenceFileName,
+            dto.referenceFileBase64,
+            dto.referenceFileContentType,
+        ) as any;
     }
     receipt.unallocatedAmount = Math.round((receipt.amount - receipt.allocatedAmount) * 100) / 100;
 
@@ -193,14 +251,34 @@ export const post = async (id: string, tenantId: string) => {
 export const list = async (query: any, tenantId: string) => {
     const filter: any = { tenantId, isDeleted: false };
     if (query.status && query.status !== 'ALL') filter.status = query.status;
+    if (query.method && query.method !== 'ALL') filter.method = query.method;
     if (query.customerId) filter.customerId = new Types.ObjectId(query.customerId);
+    if (query.dateFrom || query.dateTo) {
+        filter.postingDate = {};
+        if (query.dateFrom) {
+            const fromDate = new Date(query.dateFrom);
+            if (!Number.isNaN(fromDate.getTime())) {
+                filter.postingDate.$gte = fromDate;
+            }
+        }
+        if (query.dateTo) {
+            const toDate = new Date(query.dateTo);
+            if (!Number.isNaN(toDate.getTime())) {
+                toDate.setHours(23, 59, 59, 999);
+                filter.postingDate.$lte = toDate;
+            }
+        }
+        if (!filter.postingDate.$gte && !filter.postingDate.$lte) {
+            delete filter.postingDate;
+        }
+    }
     if (query.search) {
         const regex = { $regex: query.search, $options: 'i' };
         filter.$or = [{ receiptNo: regex }, { customerName: regex }];
     }
 
-    const page = parseInt(query.page || '1');
-    const limit = parseInt(query.limit || '50');
+    const page = Math.max(1, parseInt(query.page || '1', 10));
+    const limit = Math.max(1, parseInt(query.limit || '50', 10));
     const [data, total] = await Promise.all([
         ARReceipt.find(filter).sort({ postingDate: -1 }).skip((page - 1) * limit).limit(limit).lean(),
         ARReceipt.countDocuments(filter),

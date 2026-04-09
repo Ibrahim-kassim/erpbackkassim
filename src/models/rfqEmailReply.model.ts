@@ -10,8 +10,10 @@ export interface IRFQEmailReplyAttachment {
 
 export interface IRFQEmailReply extends Document {
     tenantId: string;
-    rfqId: Types.ObjectId;
+    rfqId?: Types.ObjectId;
+    arInvoiceId?: Types.ObjectId;
     vendorId?: Types.ObjectId;
+    customerId?: Types.ObjectId;
     direction: 'INBOUND' | 'OUTBOUND';
     messageId: string;
     subject: string;
@@ -41,8 +43,10 @@ const RFQEmailReplyAttachmentSchema = new Schema<IRFQEmailReplyAttachment>(
 const RFQEmailReplySchema = new Schema<IRFQEmailReply>(
     {
         tenantId: { type: String, required: true, index: true },
-        rfqId: { type: Schema.Types.ObjectId, ref: 'RFQ', required: true, index: true },
+        rfqId: { type: Schema.Types.ObjectId, ref: 'RFQ', index: true },
+        arInvoiceId: { type: Schema.Types.ObjectId, ref: 'ARInvoice', index: true },
         vendorId: { type: Schema.Types.ObjectId, ref: 'BusinessPartner' },
+        customerId: { type: Schema.Types.ObjectId, ref: 'BusinessPartner' },
         direction: { type: String, enum: ['INBOUND', 'OUTBOUND'], default: 'INBOUND' },
         messageId: { type: String, required: true },
         subject: { type: String, required: true },
@@ -60,6 +64,7 @@ const RFQEmailReplySchema = new Schema<IRFQEmailReply>(
 
 RFQEmailReplySchema.index({ tenantId: 1, messageId: 1 }, { unique: true });
 RFQEmailReplySchema.index({ tenantId: 1, rfqId: 1, receivedAt: -1 });
+RFQEmailReplySchema.index({ tenantId: 1, arInvoiceId: 1, receivedAt: -1 });
 
 RFQEmailReplySchema.set('toObject', { virtuals: true });
 RFQEmailReplySchema.set('toJSON', { virtuals: true });

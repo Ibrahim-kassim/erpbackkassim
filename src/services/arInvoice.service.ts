@@ -7,10 +7,15 @@ import { Product } from '../models/inventory/product.model';
 import { Uom } from '../models/inventory/uom.model';
 import { FiscalCalendar } from '../models/fiscalCalendar.model';
 import { JournalEntry } from '../models/journalEntry.model';
+import { Notification } from '../models/notification.model';
+import { RFQEmailReply } from '../models/rfqEmailReply.model';
+import { SystemConfig } from '../models/systemConfig.model';
 import { fiscalService } from './fiscal.service';
 import { createAndPostDirectly } from './journalEntry.service';
 import { getTenantBaseCurrency } from './systemConfig.defaults';
-import { CreateARInvoiceDTO, UpdateARInvoiceDTO } from '../validators/arInvoice.schema';
+import { sendConfiguredMail } from './mail.service';
+import { randomUUID } from 'crypto';
+import { CreateARInvoiceDTO, SendARInvoiceCustomerMessageDTO, UpdateARInvoiceDTO } from '../validators/arInvoice.schema';
 
 class ServiceError extends Error {
     code: string;
@@ -118,6 +123,7 @@ const mapInvoice = (inv: any) => ({
     customerId: inv.customerId?.toString(),
     customerName: inv.customerName,
     customerCode: inv.customerCode,
+    customerEmail: inv.customerEmail,
     status: inv.status,
     invoiceDate: inv.invoiceDate instanceof Date ? inv.invoiceDate.toISOString().split('T')[0] : inv.invoiceDate,
     postingDate: inv.postingDate instanceof Date ? inv.postingDate.toISOString().split('T')[0] : inv.postingDate,
@@ -161,7 +167,7 @@ const enrichInvoiceDisplay = async (tenantId: string, rawInvoice: any) => {
 
     const [customer, accounts, calendar, journalEntry] = await Promise.all([
         invoice.customerId
-            ? BusinessPartner.findOne({ _id: invoice.customerId, tenantId, isDeleted: false }).select('code name').lean()
+            ? BusinessPartner.findOne({ _id: invoice.customerId, tenantId, isDeleted: false }).select('code name email').lean()
             : null,
         ChartOfAccount.find({
             _id: {
@@ -186,6 +192,7 @@ const enrichInvoiceDisplay = async (tenantId: string, rawInvoice: any) => {
     return {
         ...invoice,
         customerCode: customer?.code || invoice.customerCode,
+        customerEmail: customer?.email || invoice.customerEmail,
         fiscalPeriodLabel: matchedPeriod?.label || invoice.fiscalPeriodLabel,
         accounting: {
             ...invoice.accounting,
@@ -376,4 +383,105 @@ export const remove = async (id: string, tenantId: string) => {
     if (invoice.status !== 'DRAFT') throw new ServiceError('Only DRAFT invoices can be deleted', 'INVALID_STATUS');
     invoice.isDeleted = true;
     await invoice.save();
+};
+
+export const sendCustomerMessage = async (
+    id: string,
+    dto: SendARInvoiceCustomerMessageDTO,
+    tenantId: string,
+) => {
+    const [invoice, config] = await Promise.all([
+        ARInvoice.findOne({ _id: id, tenantId, isDeleted: false }).select('_id invoiceNo customerId customerName status'),
+        SystemConfig.findOne({ tenantId }),
+    ]);
+
+    if (!invoice) {
+        throw new ServiceError('Invoice not found', 'NOT_FOUND');
+    }
+
+    if (!config) {
+        throw new ServiceError('Complete the company and email settings before sending messages.', 'VALIDATION_ERROR');
+    }
+
+    const customer = await BusinessPartner.findOne({ _id: invoice.customerId, tenantId, isDeleted: false })
+        .select('_id name email roles');
+    if (!customer || !customer.email) {
+        throw new ServiceError('Customer email is missing. Add an email address to the customer profile first.', 'VALIDATION_ERROR');
+    }
+
+    if (!customer.roles.includes('CUSTOMER')) {
+        throw new ServiceError('The linked business partner is not configured as a customer.', 'VALIDATION_ERROR');
+    }
+
+    const subjectWithToken = dto.subject.includes('ERP-ARINV:')
+        ? dto.subject
+        : `${dto.subject} [ERP-ARINV:${invoice.invoiceNo}]`;
+
+    const attachment =
+        dto.attachmentFileName && dto.attachmentContentBase64
+            ? {
+                filename: dto.attachmentFileName,
+                contentBase64: dto.attachmentContentBase64,
+                contentType: dto.attachmentContentType || 'application/pdf',
+            }
+            : undefined;
+
+    const info = await sendConfiguredMail({
+        config,
+        to: customer.email,
+        subject: subjectWithToken,
+        body: dto.body,
+        attachment,
+    });
+
+    const senderEmail = config.emailSettings?.senderEmail || config.email;
+    const senderName = config.emailSettings?.senderName || config.companyName || 'ERP Core';
+    const messageId = (info as any)?.messageId || `smtp-${tenantId}-${randomUUID()}`;
+
+    const record = await RFQEmailReply.create({
+        tenantId,
+        rfqId: undefined,
+        arInvoiceId: invoice._id,
+        vendorId: undefined,
+        customerId: customer._id,
+        direction: 'OUTBOUND',
+        messageId,
+        subject: subjectWithToken,
+        fromEmail: String(senderEmail || '').trim(),
+        fromName: senderName,
+        toEmail: customer.email,
+        toName: customer.name,
+        bodyText: dto.body,
+        attachments: [],
+        receivedAt: new Date(),
+        isRead: true,
+    });
+
+    const bodySnippet = dto.body.replace(/\s+/g, ' ').trim().slice(0, 240);
+    await Notification.create({
+        tenantId,
+        type: 'AR_CUSTOMER_MESSAGE_SENT',
+        title: `Message sent to ${customer.name} for ${invoice.invoiceNo}`,
+        message: bodySnippet || 'Message sent.',
+        href: `/receivables/invoices/${invoice._id}`,
+        isRead: true,
+        metadata: {
+            arInvoiceId: invoice._id.toString(),
+            arInvoiceNo: invoice.invoiceNo,
+            emailReplyId: record._id.toString(),
+            customerId: customer._id.toString(),
+            customerName: customer.name,
+            subject: subjectWithToken,
+            fromEmail: String(senderEmail || '').trim(),
+            fromName: senderName,
+            toEmail: customer.email,
+            toName: customer.name,
+            direction: 'OUTBOUND',
+            bodySnippet: bodySnippet || undefined,
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    });
+
+    return record.toObject();
 };

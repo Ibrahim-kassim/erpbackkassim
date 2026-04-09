@@ -6,6 +6,7 @@ import { simpleParser } from 'mailparser';
 import { Types } from 'mongoose';
 import { SystemConfig, type ISystemConfig } from '../models/systemConfig.model';
 import { RFQ } from '../models/rfq.model';
+import { ARInvoice } from '../models/arInvoice.model';
 import { BusinessPartner } from '../models/businessPartner.model';
 import { Notification } from '../models/notification.model';
 import { RFQEmailReply, type IRFQEmailReplyAttachment } from '../models/rfqEmailReply.model';
@@ -28,6 +29,8 @@ const activeSyncTenants = new Set<string>();
 const uploadsRoot = path.join(process.cwd(), 'uploads', 'email-replies');
 const rfqTokenRegex = /ERP-RFQ:([A-Z0-9-]+)/i;
 const rfqNumberRegex = /\bRFQ-\d{4}-\d{3}\b/i;
+const arInvoiceTokenRegex = /ERP-ARINV:([A-Z0-9-]+)/i;
+const arInvoiceNumberRegex = /\bARINV-\d{6}\b/i;
 const RECENT_SYNC_LOOKBACK_DAYS = 14;
 const RECENT_SYNC_MAX_MESSAGES = 50;
 const VENDOR_FALLBACK_LOOKBACK_DAYS = 30;
@@ -65,6 +68,12 @@ const extractRFQNumber = (value: string) => {
     const fromToken = value.match(rfqTokenRegex)?.[1];
     if (fromToken) return fromToken.toUpperCase();
     return value.match(rfqNumberRegex)?.[0]?.toUpperCase() || null;
+};
+
+const extractARInvoiceNo = (value: string) => {
+    const fromToken = value.match(arInvoiceTokenRegex)?.[1];
+    if (fromToken) return fromToken.toUpperCase();
+    return value.match(arInvoiceNumberRegex)?.[0]?.toUpperCase() || null;
 };
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -267,6 +276,7 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                     const subject = parsed.subject || message.envelope?.subject || '';
                     const bodyText = parsed.text?.trim() || parsed.html || '';
                     const rfqNumber = extractRFQNumber(subject) || extractRFQNumber(bodyText);
+                    const arInvoiceNo = extractARInvoiceNo(subject) || extractARInvoiceNo(bodyText);
                     const fromEmail = normalizeEmail(parsed.from?.value?.[0]?.address || message.envelope?.from?.[0]?.address);
                     const fromName = parsed.from?.value?.[0]?.name || undefined;
 
@@ -286,9 +296,18 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                             roles: 'VENDOR',
                             email: { $regex: `^${escapeRegex(fromEmail)}$`, $options: 'i' },
                         }).select('_id name email');
+                    const customer = await BusinessPartner.findOne({
+                        tenantId,
+                        isDeleted: false,
+                        roles: 'CUSTOMER',
+                        email: { $regex: `^${escapeRegex(fromEmail)}$`, $options: 'i' },
+                    }).select('_id name email');
 
                     let rfq = rfqNumber
                         ? await RFQ.findOne({ tenantId, rfqNumber, isDeleted: false }).select('_id rfqNumber title vendorIds')
+                        : null;
+                    const arInvoice = arInvoiceNo
+                        ? await ARInvoice.findOne({ tenantId, invoiceNo: arInvoiceNo, isDeleted: false }).select('_id invoiceNo customerId customerName')
                         : null;
 
                     if (!rfq && vendor) {
@@ -311,12 +330,17 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
                         }
                     }
 
-                    if (!rfq) {
+                    if (!rfq && !arInvoice) {
                         summary.unmatched += 1;
                         continue;
                     }
 
-                    if (vendor && !rfq.vendorIds.some((vendorId) => vendorId.equals(vendor._id as Types.ObjectId))) {
+                    if (rfq && vendor && !rfq.vendorIds.some((vendorId) => vendorId.equals(vendor._id as Types.ObjectId))) {
+                        summary.unmatched += 1;
+                        continue;
+                    }
+
+                    if (arInvoice && customer && !arInvoice.customerId.equals(customer._id as Types.ObjectId)) {
                         summary.unmatched += 1;
                         continue;
                     }
@@ -332,8 +356,10 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
 
                     const reply = await RFQEmailReply.create({
                         tenantId,
-                        rfqId: rfq._id,
+                        rfqId: rfq?._id,
+                        arInvoiceId: arInvoice?._id,
                         vendorId: vendor?._id,
+                        customerId: customer?._id,
                         direction: 'INBOUND',
                         messageId,
                         subject,
@@ -346,29 +372,55 @@ export const syncTenantMailbox = async (tenantId: string): Promise<SyncSummary> 
 
                     const bodySnippet = buildBodySnippet(stripQuotedEmail(reply.bodyText || ''));
 
-                    await Notification.create({
-                        tenantId,
-                        type: 'RFQ_VENDOR_REPLY',
-                        title: `Vendor reply received for ${rfq.rfqNumber}`,
-                        message: bodySnippet || buildNotificationMessage(vendor?.name || fromName || fromEmail, rfq.rfqNumber, attachments.length),
-                        href: `/rfqs/${rfq._id}`,
-                        metadata: {
-                            rfqId: rfq._id.toString(),
-                            rfqNumber: rfq.rfqNumber,
-                            emailReplyId: reply._id.toString(),
-                            vendorId: vendor?._id?.toString(),
-                            vendorName: vendor?.name || fromName || fromEmail,
-                            subject,
-                            fromEmail,
-                            fromName,
-                            direction: 'INBOUND',
-                            attachmentCount: attachments.length,
-                            bodySnippet: bodySnippet || undefined,
-                            attachments: attachments.length ? attachments : undefined,
-                        },
-                        createdAt: parsed.date || message.internalDate || new Date(),
-                        updatedAt: parsed.date || message.internalDate || new Date(),
-                    });
+                    if (rfq) {
+                        await Notification.create({
+                            tenantId,
+                            type: 'RFQ_VENDOR_REPLY',
+                            title: `Vendor reply received for ${rfq.rfqNumber}`,
+                            message: bodySnippet || buildNotificationMessage(vendor?.name || fromName || fromEmail, rfq.rfqNumber, attachments.length),
+                            href: `/rfqs/${rfq._id}`,
+                            metadata: {
+                                rfqId: rfq._id.toString(),
+                                rfqNumber: rfq.rfqNumber,
+                                emailReplyId: reply._id.toString(),
+                                vendorId: vendor?._id?.toString(),
+                                vendorName: vendor?.name || fromName || fromEmail,
+                                subject,
+                                fromEmail,
+                                fromName,
+                                direction: 'INBOUND',
+                                attachmentCount: attachments.length,
+                                bodySnippet: bodySnippet || undefined,
+                                attachments: attachments.length ? attachments : undefined,
+                            },
+                            createdAt: parsed.date || message.internalDate || new Date(),
+                            updatedAt: parsed.date || message.internalDate || new Date(),
+                        });
+                    } else if (arInvoice) {
+                        await Notification.create({
+                            tenantId,
+                            type: 'AR_CUSTOMER_REPLY',
+                            title: `Customer reply received for ${arInvoice.invoiceNo}`,
+                            message: bodySnippet || `${customer?.name || fromName || fromEmail} replied to ${arInvoice.invoiceNo}.`,
+                            href: `/receivables/invoices/${arInvoice._id}`,
+                            metadata: {
+                                arInvoiceId: arInvoice._id.toString(),
+                                arInvoiceNo: arInvoice.invoiceNo,
+                                emailReplyId: reply._id.toString(),
+                                customerId: customer?._id?.toString() || arInvoice.customerId.toString(),
+                                customerName: customer?.name || arInvoice.customerName || fromName || fromEmail,
+                                subject,
+                                fromEmail,
+                                fromName,
+                                direction: 'INBOUND',
+                                attachmentCount: attachments.length,
+                                bodySnippet: bodySnippet || undefined,
+                                attachments: attachments.length ? attachments : undefined,
+                            },
+                            createdAt: parsed.date || message.internalDate || new Date(),
+                            updatedAt: parsed.date || message.internalDate || new Date(),
+                        });
+                    }
 
                     await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
                     summary.imported += 1;

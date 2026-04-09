@@ -38,5 +38,14 @@ export const updateARInvoiceSchema = z.object({
     }).optional(),
 });
 
+export const sendARInvoiceCustomerMessageSchema = z.object({
+    subject: z.string().min(3, 'Subject is required'),
+    body: z.string().min(1, 'Message is required'),
+    attachmentFileName: z.string().min(1).optional(),
+    attachmentContentBase64: z.string().min(1).optional(),
+    attachmentContentType: z.string().min(1).optional().default('application/pdf'),
+});
+
 export type CreateARInvoiceDTO = z.infer<typeof createARInvoiceSchema>;
 export type UpdateARInvoiceDTO = z.infer<typeof updateARInvoiceSchema>;
+export type SendARInvoiceCustomerMessageDTO = z.infer<typeof sendARInvoiceCustomerMessageSchema>;

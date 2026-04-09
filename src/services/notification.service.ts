@@ -110,6 +110,22 @@ export const listRFQThreadNotifications = async (tenantId: string, rfqId: string
     return { items };
 };
 
+export const listARInvoiceThreadNotifications = async (tenantId: string, arInvoiceId: string, limit = 200) => {
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+    const items = await Notification.find({
+        tenantId,
+        type: { $in: ['AR_CUSTOMER_REPLY', 'AR_CUSTOMER_MESSAGE_SENT'] },
+        'metadata.arInvoiceId': arInvoiceId,
+    })
+        .sort({ createdAt: 1 })
+        .limit(safeLimit)
+        .lean();
+
+    await enrichNotificationReplies(tenantId, items);
+
+    return { items };
+};
+
 export const markNotificationRead = async (tenantId: string, id: string) => {
     const notification = await Notification.findOneAndUpdate(
         { _id: id, tenantId },

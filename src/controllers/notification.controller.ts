@@ -29,3 +29,9 @@ export const listRFQThread = asyncHandler(async (req: Request, res: Response) =>
     const data = await notificationService.listRFQThreadNotifications(req.tenantId!, req.params.rfqId, limit);
     res.status(200).json({ data });
 });
+
+export const listARInvoiceThread = asyncHandler(async (req: Request, res: Response) => {
+    const limit = Number(req.query.limit || 200);
+    const data = await notificationService.listARInvoiceThreadNotifications(req.tenantId!, req.params.arInvoiceId, limit);
+    res.status(200).json({ data });
+});

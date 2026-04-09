@@ -15,6 +15,9 @@ export const createARReceiptSchema = z.object({
     arAccountId: z.string().min(1, 'AR account is required'),
     amount: z.number().positive('Amount must be positive'),
     memo: z.string().optional(),
+    referenceFileName: z.string().min(1).optional(),
+    referenceFileBase64: z.string().min(1).optional(),
+    referenceFileContentType: z.string().min(1).optional().default('application/pdf'),
     allocations: z.array(allocationSchema).default([]),
 });
 
@@ -26,6 +29,9 @@ export const updateARReceiptSchema = z.object({
     arAccountId: z.string().optional(),
     amount: z.number().positive().optional(),
     memo: z.string().optional(),
+    referenceFileName: z.string().min(1).optional(),
+    referenceFileBase64: z.string().min(1).optional(),
+    referenceFileContentType: z.string().min(1).optional(),
     allocations: z.array(allocationSchema).optional(),
 });
 

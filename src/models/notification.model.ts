@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface INotification extends Document {
     tenantId: string;
-    type: 'RFQ_VENDOR_REPLY' | 'RFQ_VENDOR_MESSAGE_SENT';
+    type: 'RFQ_VENDOR_REPLY' | 'RFQ_VENDOR_MESSAGE_SENT' | 'AR_CUSTOMER_REPLY' | 'AR_CUSTOMER_MESSAGE_SENT';
     title: string;
     message: string;
     href?: string;
@@ -10,9 +10,13 @@ export interface INotification extends Document {
     metadata?: {
         rfqId?: string;
         rfqNumber?: string;
+        arInvoiceId?: string;
+        arInvoiceNo?: string;
         emailReplyId?: string;
         vendorId?: string;
         vendorName?: string;
+        customerId?: string;
+        customerName?: string;
         subject?: string;
         fromEmail?: string;
         fromName?: string;
@@ -38,7 +42,7 @@ const NotificationSchema = new Schema<INotification>(
         tenantId: { type: String, required: true, index: true },
         type: {
             type: String,
-            enum: ['RFQ_VENDOR_REPLY', 'RFQ_VENDOR_MESSAGE_SENT'],
+            enum: ['RFQ_VENDOR_REPLY', 'RFQ_VENDOR_MESSAGE_SENT', 'AR_CUSTOMER_REPLY', 'AR_CUSTOMER_MESSAGE_SENT'],
             required: true,
         },
         title: { type: String, required: true },
@@ -48,9 +52,13 @@ const NotificationSchema = new Schema<INotification>(
         metadata: {
             rfqId: { type: String },
             rfqNumber: { type: String },
+            arInvoiceId: { type: String },
+            arInvoiceNo: { type: String },
             emailReplyId: { type: String },
             vendorId: { type: String },
             vendorName: { type: String },
+            customerId: { type: String },
+            customerName: { type: String },
             subject: { type: String },
             fromEmail: { type: String },
             fromName: { type: String },

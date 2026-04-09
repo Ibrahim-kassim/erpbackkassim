@@ -30,6 +30,12 @@ export interface IARReceipt extends Document {
     allocations: IARAllocation[];
     journalEntryId?: Types.ObjectId;
     journalEntryNo?: string;
+    referenceDocument?: {
+        filename: string;
+        url: string;
+        contentType?: string;
+        size?: number;
+    };
     isDeleted: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -63,6 +69,12 @@ const ARReceiptSchema = new Schema<IARReceipt>(
         allocations: { type: [ARAllocationSchema], default: [] },
         journalEntryId: { type: Schema.Types.ObjectId, ref: 'JournalEntry' },
         journalEntryNo: { type: String },
+        referenceDocument: {
+            filename: { type: String },
+            url: { type: String },
+            contentType: { type: String },
+            size: { type: Number },
+        },
         isDeleted: { type: Boolean, default: false },
     },
     { timestamps: true, collection: 'ar_receipts' }

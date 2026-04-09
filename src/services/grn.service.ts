@@ -358,8 +358,16 @@ export const list = async (query: any, tenantId: string) => {
     if (query.poId) filter.poId = new Types.ObjectId(query.poId);
     if (query.dateFrom || query.dateTo) {
         filter.receiptDate = {};
-        if (query.dateFrom) filter.receiptDate.$gte = new Date(query.dateFrom);
-        if (query.dateTo) filter.receiptDate.$lte = new Date(query.dateTo);
+        if (query.dateFrom) {
+            const from = new Date(query.dateFrom);
+            from.setHours(0, 0, 0, 0);
+            filter.receiptDate.$gte = from;
+        }
+        if (query.dateTo) {
+            const to = new Date(query.dateTo);
+            to.setHours(23, 59, 59, 999);
+            filter.receiptDate.$lte = to;
+        }
     }
 
     return GRN.find(filter).sort({ receiptDate: -1, createdAt: -1 }).lean();
