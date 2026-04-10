@@ -6,6 +6,7 @@ const router = Router();
 // Reporting endpoints (before :id to avoid route conflicts)
 router.get('/aging', controller.getAging);
 router.get('/customer-statement', controller.getCustomerStatement);
+router.get('/customer-allocations', controller.getCustomerAllocations);
 router.get('/outstanding/:customerId', controller.getOutstandingInvoices);
 
 router.get('/', controller.getAll);

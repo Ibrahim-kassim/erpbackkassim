@@ -20,18 +20,28 @@ export const getOutstandingInvoices = asyncHandler(async (req: Request, res: Res
 });
 
 export const getAging = asyncHandler(async (req: Request, res: Response) => {
-    const { customerId } = req.query as { customerId?: string };
-    const data = await agingService.getARAging(req.tenantId!, customerId);
+    const { customerId, asOfDate, includeZero } = req.query as { customerId?: string; asOfDate?: string; includeZero?: string };
+    const data = await agingService.getARAging(req.tenantId!, customerId, asOfDate, includeZero === 'true');
     res.status(200).json({ data });
 });
 
 export const getCustomerStatement = asyncHandler(async (req: Request, res: Response) => {
-    const { customerId } = req.query as { customerId?: string };
+    const { customerId, asOfDate, fromDate } = req.query as { customerId?: string; asOfDate?: string; fromDate?: string };
     if (!customerId) {
         res.status(400).json({ code: 'VALIDATION_ERROR', message: 'customerId is required' });
         return;
     }
-    const data = await agingService.getCustomerStatement(req.tenantId!, customerId);
+    const data = await agingService.getCustomerStatement(req.tenantId!, customerId, asOfDate, fromDate);
+    res.status(200).json({ data });
+});
+
+export const getCustomerAllocations = asyncHandler(async (req: Request, res: Response) => {
+    const { customerId, asOfDate } = req.query as { customerId?: string; asOfDate?: string };
+    if (!customerId) {
+        res.status(400).json({ code: 'VALIDATION_ERROR', message: 'customerId is required' });
+        return;
+    }
+    const data = await agingService.getCustomerAllocations(req.tenantId!, customerId, asOfDate);
     res.status(200).json({ data });
 });
 
