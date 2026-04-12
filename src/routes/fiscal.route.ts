@@ -1,7 +1,9 @@
 import express from 'express';
 import * as controller from '../controllers/fiscal.controller';
+import { fiscalCalendarRateLimiter } from '../middleware/fiscalCalendarRateLimiter';
 
 const router = express.Router();
+router.use(fiscalCalendarRateLimiter);
 
 router.get('/years', controller.getFiscalYears);
 router.post('/years', controller.createFiscalYear);

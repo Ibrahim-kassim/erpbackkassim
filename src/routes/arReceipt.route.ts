@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import * as controller from '../controllers/arReceipt.controller';
+import { customerReceiptsRateLimiter } from '../middleware/customerReceiptsRateLimiter';
+import { arAgingRateLimiter } from '../middleware/arAgingRateLimiter';
+import { customerStatementRateLimiter } from '../middleware/customerStatementRateLimiter';
 
 const router = Router();
+router.use(customerReceiptsRateLimiter);
 
 // Reporting endpoints (before :id to avoid route conflicts)
-router.get('/aging', controller.getAging);
-router.get('/customer-statement', controller.getCustomerStatement);
+router.get('/aging', arAgingRateLimiter, controller.getAging);
+router.get('/customer-statement', customerStatementRateLimiter, controller.getCustomerStatement);
 router.get('/customer-allocations', controller.getCustomerAllocations);
 router.get('/outstanding/:customerId', controller.getOutstandingInvoices);
 

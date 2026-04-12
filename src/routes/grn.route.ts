@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import * as controller from '../controllers/grn.controller';
+import { goodsReceiptsRateLimiter } from '../middleware/goodsReceiptsRateLimiter';
 
 const router = Router();
+router.use(goodsReceiptsRateLimiter);
 
 router.get('/', controller.getAll);
 router.get('/:id', controller.getOne);

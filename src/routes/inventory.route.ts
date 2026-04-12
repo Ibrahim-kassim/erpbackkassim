@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import * as inventoryController from '../controllers/inventory.controller';
+import { productsServicesRateLimiter } from '../middleware/productsServicesRateLimiter';
+import { stockOverviewRateLimiter } from '../middleware/stockOverviewRateLimiter';
 const router = Router();
+
+router.use('/products', productsServicesRateLimiter);
+router.use('/categories', productsServicesRateLimiter);
+router.use('/uoms', productsServicesRateLimiter);
+router.use('/stock', stockOverviewRateLimiter);
 
 // --- Products ---
 router.post('/products', inventoryController.createProduct);

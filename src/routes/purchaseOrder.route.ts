@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import * as poController from '../controllers/purchaseOrder.controller';
-import { auth } from '../middleware/auth';
+import { purchaseOrdersRateLimiter } from '../middleware/purchaseOrdersRateLimiter';
 
 const router = Router();
-router.use(auth);
+router.use(purchaseOrdersRateLimiter);
 
 router.get('/', poController.getAll);
 router.get('/:id', poController.getById);

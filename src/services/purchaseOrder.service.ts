@@ -18,10 +18,7 @@ class ServiceError extends Error {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function tenantScope(tenantId: string) {
-    // In this repo, `middleware/auth.ts` hardcodes `tenant_demo` for no-auth/dev mode.
-    // Some older seeded records may have mismatching tenantIds; allowing a fallback
-    // here prevents "created but not visible" issues while we are in demo mode.
-    return tenantId === 'tenant_demo' ? {} : { tenantId };
+    return { tenantId };
 }
 
 function calcLine(
@@ -309,15 +306,11 @@ export async function create(
 }
 
 export async function createFromQuotation(quotationId: string, tenantId: string, extras?: { orderDate?: string; expectedDeliveryDate?: string; notes?: string }) {
-    // Validate quotation. Use the same tenant-scope fallback behavior as quotation.service.ts,
-    // because RFQs/quotations may be accessible across a tenant mismatch in this app.
-    const quotation =
-        await Quotation.findOne({ _id: quotationId, tenantId, isDeleted: false }) ||
-        await Quotation.findOne({ _id: quotationId, isDeleted: false });
+    const quotation = await Quotation.findOne({ _id: quotationId, tenantId, isDeleted: false });
     if (!quotation) throw new ServiceError('Quotation not found', 'NOT_FOUND');
     if (quotation.status !== 'APPROVED') throw new ServiceError('Only APPROVED quotations can generate a Purchase Order', 'VALIDATION');
 
-    const effectiveTenantId = quotation.tenantId;
+    const effectiveTenantId = tenantId;
 
     // Check not already converted
     const existing = await PurchaseOrder.findOne({ 'source.quotationId': quotationId, tenantId: effectiveTenantId, isDeleted: false });

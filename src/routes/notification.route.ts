@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import * as controller from '../controllers/notification.controller';
+import { notificationsRateLimiter } from '../middleware/notificationsRateLimiter';
 
 const router = Router();
+router.use(notificationsRateLimiter);
 
 router.get('/', controller.list);
 router.get('/rfq/:rfqId', controller.listRFQThread);

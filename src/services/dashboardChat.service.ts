@@ -2287,6 +2287,16 @@ export async function getDashboardChatSession(tenantId: string, userId: string, 
     return mapSession(session.toObject());
 }
 
+export async function deleteDashboardChatSession(tenantId: string, userId: string, sessionId: string) {
+    const session = await DashboardChatSession.findOne({ _id: sessionId, tenantId, userId }).select('_id');
+    if (!session) throw new ServiceError('Dashboard chat session not found', 'NOT_FOUND');
+
+    await DashboardArtifact.deleteMany({ tenantId, sessionId: session._id });
+    await DashboardChatSession.deleteOne({ _id: session._id, tenantId, userId });
+
+    return { id: session._id.toString(), deleted: true };
+}
+
 export async function sendDashboardChatMessage(tenantId: string, userId: string, dto: DashboardChatMessageDTO) {
     const session = await DashboardChatSession.findOne({ _id: dto.sessionId, tenantId, userId });
     if (!session) throw new ServiceError('Dashboard chat session not found', 'NOT_FOUND');

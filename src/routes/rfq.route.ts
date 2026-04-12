@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import * as controller from '../controllers/rfq.controller';
+import { rfqRateLimiter } from '../middleware/rfqRateLimiter';
 
 const router = Router();
+router.use(rfqRateLimiter);
 
 router.get('/', controller.getAll);
 router.get('/:id', controller.getOne);

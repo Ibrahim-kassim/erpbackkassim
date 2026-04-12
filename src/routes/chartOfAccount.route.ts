@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import * as controller from '../controllers/chartOfAccount.controller';
 // import { auth } from '../middleware/auth'; // already applied globally or here
+import { chartOfAccountRateLimiter } from '../middleware/chartOfAccountRateLimiter';
 
 const router = Router();
+router.use(chartOfAccountRateLimiter);
 
 router.get('/', controller.list);
 router.get('/tree', controller.getTree);

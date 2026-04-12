@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import * as controller from '../controllers/businessPartner.controller';
+import { businessPartnersRateLimiter } from '../middleware/businessPartnersRateLimiter';
 
 const router = Router();
+router.use(businessPartnersRateLimiter);
 
 router.get('/', controller.getAll);
 router.post('/import', controller.importRows);

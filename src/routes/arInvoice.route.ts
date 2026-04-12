@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import * as controller from '../controllers/arInvoice.controller';
+import { customerInvoicesRateLimiter } from '../middleware/customerInvoicesRateLimiter';
 
 const router = Router();
+router.use(customerInvoicesRateLimiter);
 
 router.get('/', controller.getAll);
 router.get('/:id', controller.getOne);

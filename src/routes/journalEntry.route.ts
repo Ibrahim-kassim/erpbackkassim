@@ -1,7 +1,9 @@
 import express from 'express';
 import * as controller from '../controllers/journalEntry.controller';
+import { journalEntryRateLimiter } from '../middleware/journalEntryRateLimiter';
 
 const router = express.Router();
+router.use(journalEntryRateLimiter);
 
 router.get('/', controller.list);
 router.post('/', controller.create);

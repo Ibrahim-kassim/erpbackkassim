@@ -33,6 +33,11 @@ export const dashboardChatController = {
         res.status(200).json({ data });
     }),
 
+    deleteSession: asyncHandler(async (req: Request, res: Response) => {
+        const data = await service.deleteDashboardChatSession(req.tenantId!, req.userId || 'dev_user', req.params.id);
+        res.status(200).json({ data });
+    }),
+
     message: asyncHandler(async (req: Request, res: Response) => {
         const validation = dashboardChatMessageSchema.safeParse(req.body);
         if (!validation.success) {
