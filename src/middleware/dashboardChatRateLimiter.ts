@@ -1,20 +1,54 @@
 import rateLimit from 'express-rate-limit';
 import { Request } from 'express';
+import { getRateLimitCallerKey } from './rateLimitKey';
 
-const getCallerKey = (req: Request): string => {
-    const tenantId = req.tenantId ?? 'unknown-tenant';
-    const userId = req.userId ?? req.ip ?? 'unknown-caller';
-    return `${tenantId}:${userId}`;
-};
+const buildDashboardChatLimiter = (
+    max: number,
+    windowMs: number,
+    label: string
+) =>
+    rateLimit({
+        windowMs,
+        max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        keyGenerator: getRateLimitCallerKey,
+        handler: (req, res, _next, options) => {
+            const rateLimitInfo = (req as Request & { rateLimit?: { resetTime?: Date } }).rateLimit;
+            const resetTime = rateLimitInfo?.resetTime?.getTime();
+            const retryAfterSeconds = Math.max(
+                1,
+                Math.ceil(
+                    ((typeof resetTime === 'number' ? resetTime : Date.now() + windowMs) - Date.now()) / 1000
+                )
+            );
 
-export const dashboardChatRateLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 10, // 10 calls per minute per caller
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: getCallerKey,
-    message: {
-        code: 'TOO_MANY_REQUESTS',
-        message: 'Dashboard Chat API rate limit exceeded (10 requests/min). Please try again in one minute.',
-    },
-});
+            res.setHeader('Retry-After', String(retryAfterSeconds));
+            res.status(options.statusCode).json({
+                code: 'TOO_MANY_REQUESTS',
+                message: `${label} rate limit exceeded. Please try again in ${retryAfterSeconds} second(s).`,
+                retryAfterSeconds,
+            });
+        },
+    });
+
+// Read endpoints (session lists / fetch / export artifact)
+export const dashboardChatReadRateLimiter = buildDashboardChatLimiter(
+    120,
+    60 * 1000,
+    'Dashboard Chat read'
+);
+
+// Session bootstrap (new/resume session)
+export const dashboardChatSessionRateLimiter = buildDashboardChatLimiter(
+    30,
+    60 * 1000,
+    'Dashboard Chat session'
+);
+
+// Conversation requests (LLM-heavy endpoints)
+export const dashboardChatConversationRateLimiter = buildDashboardChatLimiter(
+    40,
+    60 * 1000,
+    'Dashboard Chat conversation'
+);

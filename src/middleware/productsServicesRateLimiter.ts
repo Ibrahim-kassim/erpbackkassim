@@ -1,18 +1,12 @@
 import rateLimit from 'express-rate-limit';
-import { Request } from 'express';
-
-const getCallerKey = (req: Request): string => {
-    const tenantId = req.tenantId ?? 'unknown-tenant';
-    const userId = req.userId ?? req.ip ?? 'unknown-caller';
-    return `${tenantId}:${userId}`;
-};
+import { getRateLimitCallerKey } from './rateLimitKey';
 
 export const productsServicesRateLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
     max: 10, // 10 calls per minute per caller
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: getCallerKey,
+    keyGenerator: getRateLimitCallerKey,
     message: {
         code: 'TOO_MANY_REQUESTS',
         message: 'Products & Services API rate limit exceeded (10 requests/min). Please try again in one minute.',

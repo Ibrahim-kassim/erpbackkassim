@@ -9,11 +9,14 @@ import { dashboardChatController } from '../controllers/dashboardChat.controller
 import { trialBalanceRateLimiter } from '../middleware/trialBalanceRateLimiter';
 import { generalLedgerRateLimiter } from '../middleware/generalLedgerRateLimiter';
 import { financialStatementsRateLimiter } from '../middleware/financialStatementsRateLimiter';
-import { dashboardChatRateLimiter } from '../middleware/dashboardChatRateLimiter';
+import {
+    dashboardChatConversationRateLimiter,
+    dashboardChatReadRateLimiter,
+    dashboardChatSessionRateLimiter,
+} from '../middleware/dashboardChatRateLimiter';
 
 const router = Router();
 router.use('/general-ledger', generalLedgerRateLimiter);
-router.use('/dashboard/chat', dashboardChatRateLimiter);
 
 router.get('/trial-balance', trialBalanceRateLimiter, trialBalanceController.getTrialBalance);
 router.get('/trial-balance-hier', trialBalanceRateLimiter, trialBalanceController.getHierarchicalTrialBalance);
@@ -27,13 +30,13 @@ router.post('/general-ledger/query', generalLedgerAiController.query);
 router.get('/financial-statements', financialStatementsRateLimiter, financialStatementsController.getFinancialStatements);
 router.get('/dashboard/overview', dashboardController.overview);
 router.post('/dashboard/query', dashboardController.query);
-router.get('/dashboard/chat/sessions', dashboardChatController.listSessions);
-router.post('/dashboard/chat/session', dashboardChatController.createSession);
-router.get('/dashboard/chat/session/:id', dashboardChatController.getSession);
-router.delete('/dashboard/chat/session/:id', dashboardChatController.deleteSession);
-router.post('/dashboard/chat/message', dashboardChatController.message);
-router.post('/dashboard/chat/action', dashboardChatController.action);
-router.get('/dashboard/chat/export/:artifactId', dashboardChatController.downloadArtifact);
+router.get('/dashboard/chat/sessions', dashboardChatReadRateLimiter, dashboardChatController.listSessions);
+router.post('/dashboard/chat/session', dashboardChatSessionRateLimiter, dashboardChatController.createSession);
+router.get('/dashboard/chat/session/:id', dashboardChatReadRateLimiter, dashboardChatController.getSession);
+router.delete('/dashboard/chat/session/:id', dashboardChatSessionRateLimiter, dashboardChatController.deleteSession);
+router.post('/dashboard/chat/message', dashboardChatConversationRateLimiter, dashboardChatController.message);
+router.post('/dashboard/chat/action', dashboardChatConversationRateLimiter, dashboardChatController.action);
+router.get('/dashboard/chat/export/:artifactId', dashboardChatReadRateLimiter, dashboardChatController.downloadArtifact);
 
 export default router;
 
