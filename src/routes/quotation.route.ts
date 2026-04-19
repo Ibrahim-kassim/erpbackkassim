@@ -48,6 +48,8 @@ router.get('/rfq/:rfqId', quotationController.getRFQQuotations);
 router.post('/', quotationController.submitQuotation);
 router.post('/:id/select', quotationController.selectQuotation);
 router.post('/:id/documents', upload.array('files', 10), quotationController.uploadDocuments);
+router.get('/:id/documents/:filename/file', quotationController.getDocumentFile);
+router.delete('/:id/documents/:filename', quotationController.deleteDocument);
 router.post('/:id/pdf', upload.single('pdf'), quotationController.uploadPdf);
 router.delete('/:id', quotationController.deleteQuotation);
 

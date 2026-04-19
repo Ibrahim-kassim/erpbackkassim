@@ -4,6 +4,22 @@ import * as quotationService from '../services/quotation.service';
 import { createQuotationSchema } from '../validators/quotation.schema';
 import { Quotation } from '../models/quotation.model';
 import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+
+const getUploadsRoots = () => {
+    const currentUploads = path.join(process.cwd(), 'uploads', 'quotations');
+    const parentUploads = path.resolve(process.cwd(), '..', 'uploads', 'quotations');
+    return Array.from(new Set([currentUploads, parentUploads]));
+};
+
+const findExistingDocumentPath = (filename: string): string | null => {
+    for (const root of getUploadsRoots()) {
+        const candidate = path.join(root, filename);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+};
 
 export const submitQuotation = asyncHandler(async (req: Request, res: Response) => {
     const validatedData = createQuotationSchema.parse(req.body);
@@ -101,5 +117,77 @@ export const uploadPdf = asyncHandler(async (req: Request, res: Response) => {
     await quotation.save();
 
     res.json({ data: { pdfPath: quotation.pdfPath, attachments: quotation.attachments } });
+});
+
+export const getDocumentFile = asyncHandler(async (req: Request, res: Response) => {
+    const { id, filename } = req.params;
+    const safeFilename = path.basename(filename);
+
+    const quotation =
+        await Quotation.findOne({ _id: id, tenantId: req.tenantId!, isDeleted: false }) ||
+        await Quotation.findOne({ _id: id, isDeleted: false });
+    if (!quotation) {
+        res.status(404).json({ error: 'Quotation not found' });
+        return;
+    }
+
+    const attachment = (quotation.attachments || []).find((item) => item.filename === safeFilename);
+    if (!attachment) {
+        res.status(404).json({ error: 'Document not found' });
+        return;
+    }
+
+    const absolutePath = findExistingDocumentPath(safeFilename);
+    if (!absolutePath) {
+        res.status(404).json({ error: 'Document file missing on server' });
+        return;
+    }
+
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.sendFile(absolutePath);
+});
+
+export const deleteDocument = asyncHandler(async (req: Request, res: Response) => {
+    const { id, filename } = req.params;
+    const safeFilename = path.basename(filename);
+
+    const quotation =
+        await Quotation.findOne({ _id: id, tenantId: req.tenantId!, isDeleted: false }) ||
+        await Quotation.findOne({ _id: id, isDeleted: false });
+    if (!quotation) {
+        res.status(404).json({ error: 'Quotation not found' });
+        return;
+    }
+
+    const remaining = (quotation.attachments || []).filter((item) => item.filename !== safeFilename);
+    const removedCount = (quotation.attachments || []).length - remaining.length;
+    if (removedCount <= 0) {
+        res.status(404).json({ error: 'Document not found' });
+        return;
+    }
+
+    quotation.attachments = remaining as any;
+
+    if ((quotation.pdfPath || '').includes(safeFilename)) {
+        const nextPdf = [...remaining].reverse().find((item) =>
+            (item.contentType || '').toLowerCase() === 'application/pdf' || item.url.toLowerCase().endsWith('.pdf')
+        );
+        quotation.pdfPath = nextPdf ? nextPdf.url : undefined;
+    }
+
+    await quotation.save();
+
+    for (const root of getUploadsRoots()) {
+        const absolutePath = path.join(root, safeFilename);
+        if (fs.existsSync(absolutePath)) {
+            try {
+                fs.unlinkSync(absolutePath);
+            } catch {
+                // ignore file removal errors after DB update
+            }
+        }
+    }
+
+    res.json({ data: { attachments: quotation.attachments, pdfPath: quotation.pdfPath } });
 });
 
