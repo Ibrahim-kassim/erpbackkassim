@@ -19,6 +19,7 @@ router.get('/:id', vendorPaymentsRateLimiter, controller.getOne);
 router.post('/', vendorPaymentsRateLimiter, controller.create);
 router.put('/:id', vendorPaymentsRateLimiter, controller.update);
 router.post('/:id/post', vendorPaymentsRateLimiter, controller.post);
+router.post('/:id/vendor-message', vendorPaymentsRateLimiter, controller.sendVendorMessage);
 router.delete('/:id', vendorPaymentsRateLimiter, controller.remove);
 
 export default router;

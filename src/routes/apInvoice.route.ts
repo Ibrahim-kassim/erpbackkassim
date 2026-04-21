@@ -11,6 +11,7 @@ router.post('/', controller.create);
 router.put('/:id', controller.update);
 router.post('/:id/post', controller.post);
 router.post('/:id/void', controller.voidInvoice);
+router.post('/:id/vendor-message', controller.sendVendorMessage);
 router.delete('/:id', controller.remove);
 
 export default router;

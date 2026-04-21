@@ -33,6 +33,14 @@ const updatePOSchema = z.object({
     lines: z.array(lineSchema).optional(),
 });
 
+const sendVendorMessageSchema = z.object({
+    subject: z.string().min(3, 'Subject is required'),
+    body: z.string().min(1, 'Message is required'),
+    attachmentFileName: z.string().min(1).optional(),
+    attachmentContentBase64: z.string().min(1).optional(),
+    attachmentContentType: z.string().min(1).optional().default('application/pdf'),
+});
+
 export const getAll = asyncHandler(async (req: Request, res: Response) => {
     const { search, status, dateFrom, dateTo, vendorId, receiptStatus, billingStatus } = req.query as Record<string, string>;
     const pos = await poService.getAll(req.tenantId!, { search, status, dateFrom, dateTo, vendorId, receiptStatus, billingStatus });
@@ -81,4 +89,15 @@ export const close = asyncHandler(async (req: Request, res: Response) => {
 export const deletePO = asyncHandler(async (req: Request, res: Response) => {
     await poService.softDelete(req.params.id, req.tenantId!);
     res.status(204).send();
+});
+
+export const sendVendorMessage = asyncHandler(async (req: Request, res: Response) => {
+    const validation = sendVendorMessageSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Invalid inputs', details: validation.error.format() });
+        return;
+    }
+
+    const data = await poService.sendVendorMessage(req.params.id, validation.data, req.tenantId!);
+    res.status(200).json({ data });
 });

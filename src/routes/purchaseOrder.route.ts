@@ -13,6 +13,7 @@ router.put('/:id', poController.update);
 router.post('/:id/approve', poController.approve);
 router.post('/:id/cancel', poController.cancel);
 router.post('/:id/close', poController.close);
+router.post('/:id/vendor-message', poController.sendVendorMessage);
 router.delete('/:id', poController.deletePO);
 
 export default router;

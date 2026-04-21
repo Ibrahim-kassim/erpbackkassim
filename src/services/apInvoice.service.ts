@@ -4,11 +4,13 @@ import { BusinessPartner } from '../models/businessPartner.model';
 import { AccountType, ChartOfAccount } from '../models/chartOfAccount.model';
 import { Counter } from '../models/counter.model';
 import { PurchaseOrder } from '../models/purchaseOrder.model';
+import { SystemConfig } from '../models/systemConfig.model';
 import { fiscalService } from './fiscal.service';
 import { createAndPostDirectly } from './journalEntry.service';
 import { refreshPurchaseOrderLifecycle } from './purchaseOrder.service';
 import { getTenantBaseCurrency } from './systemConfig.defaults';
-import { CreateAPInvoiceDTO, UpdateAPInvoiceDTO } from '../validators/apInvoice.schema';
+import { sendConfiguredMail } from './mail.service';
+import { CreateAPInvoiceDTO, SendAPInvoiceVendorMessageDTO, UpdateAPInvoiceDTO } from '../validators/apInvoice.schema';
 
 class ServiceError extends Error {
     code: string;
@@ -335,6 +337,71 @@ export const remove = async (id: string, tenantId: string) => {
     if (purchaseOrderId) {
         await refreshPurchaseOrderLifecycle(tenantId, purchaseOrderId);
     }
+};
+
+export const sendVendorMessage = async (
+    id: string,
+    dto: SendAPInvoiceVendorMessageDTO,
+    tenantId: string
+) => {
+    ensureValidInvoiceId(id);
+
+    const [invoice, config] = await Promise.all([
+        APInvoice.findOne({ _id: id, tenantId, isDeleted: false }).select('_id invoiceNo vendorId vendorName status'),
+        SystemConfig.findOne({ tenantId }),
+    ]);
+
+    if (!invoice) throw new ServiceError('Invoice not found', 'NOT_FOUND');
+    if (invoice.status !== 'POSTED') {
+        throw new ServiceError('Only POSTED vendor bills can be sent by email', 'INVALID_STATUS');
+    }
+    if (!config) {
+        throw new ServiceError('Complete company and email settings before sending vendor bills', 'VALIDATION_ERROR');
+    }
+
+    const vendor = await BusinessPartner.findOne({
+        _id: invoice.vendorId,
+        tenantId,
+        isDeleted: false,
+    }).select('_id name email roles');
+
+    if (!vendor || !vendor.email) {
+        throw new ServiceError('Vendor email is missing. Add vendor email in Business Partners first.', 'VALIDATION_ERROR');
+    }
+    if (!vendor.roles.includes('VENDOR')) {
+        throw new ServiceError('Linked business partner is not configured as a vendor', 'VALIDATION_ERROR');
+    }
+
+    const subjectWithToken = dto.subject.includes('ERP-APINV:')
+        ? dto.subject
+        : `${dto.subject} [ERP-APINV:${invoice.invoiceNo}]`;
+
+    const attachment =
+        dto.attachmentFileName && dto.attachmentContentBase64
+            ? {
+                filename: dto.attachmentFileName,
+                contentBase64: dto.attachmentContentBase64,
+                contentType: dto.attachmentContentType || 'application/pdf',
+            }
+            : undefined;
+
+    await sendConfiguredMail({
+        config,
+        to: vendor.email,
+        subject: subjectWithToken,
+        body: dto.body,
+        attachment,
+    });
+
+    return {
+        invoiceId: invoice._id.toString(),
+        invoiceNo: invoice.invoiceNo,
+        vendorId: vendor._id.toString(),
+        vendorName: vendor.name,
+        vendorEmail: vendor.email,
+        subject: subjectWithToken,
+        sentAt: new Date().toISOString(),
+    };
 };
 
 // ─── Map to frontend shape ────────────────────────────────────────────────────

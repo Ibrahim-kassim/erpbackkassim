@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { createAPInvoiceSchema, updateAPInvoiceSchema } from '../validators/apInvoice.schema';
+import { createAPInvoiceSchema, sendAPInvoiceVendorMessageSchema, updateAPInvoiceSchema } from '../validators/apInvoice.schema';
 import * as service from '../services/apInvoice.service';
 
 export const getAll = asyncHandler(async (req: Request, res: Response) => {
@@ -46,4 +46,14 @@ export const voidInvoice = asyncHandler(async (req: Request, res: Response) => {
 export const remove = asyncHandler(async (req: Request, res: Response) => {
     await service.remove(req.params.id, req.tenantId!);
     res.status(200).json({ success: true });
+});
+
+export const sendVendorMessage = asyncHandler(async (req: Request, res: Response) => {
+    const validation = sendAPInvoiceVendorMessageSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Invalid inputs', details: validation.error.format() });
+        return;
+    }
+    const data = await service.sendVendorMessage(req.params.id, validation.data, req.tenantId!);
+    res.status(200).json({ data });
 });

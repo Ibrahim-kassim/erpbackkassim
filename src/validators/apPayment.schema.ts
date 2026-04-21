@@ -30,5 +30,14 @@ export const updateAPPaymentSchema = z.object({
     allocations: z.array(allocationSchema).optional(),
 });
 
+export const sendAPPaymentVendorMessageSchema = z.object({
+    subject: z.string().min(3, 'Subject is required'),
+    body: z.string().min(1, 'Message is required'),
+    attachmentFileName: z.string().min(1).optional(),
+    attachmentContentBase64: z.string().min(1).optional(),
+    attachmentContentType: z.string().min(1).optional().default('application/pdf'),
+});
+
 export type CreateAPPaymentDTO = z.infer<typeof createAPPaymentSchema>;
 export type UpdateAPPaymentDTO = z.infer<typeof updateAPPaymentSchema>;
+export type SendAPPaymentVendorMessageDTO = z.infer<typeof sendAPPaymentVendorMessageSchema>;

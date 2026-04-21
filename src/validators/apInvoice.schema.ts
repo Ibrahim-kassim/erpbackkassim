@@ -36,5 +36,14 @@ export const updateAPInvoiceSchema = z.object({
     accounting: accountingSchema.optional(),
 });
 
+export const sendAPInvoiceVendorMessageSchema = z.object({
+    subject: z.string().min(3, 'Subject is required'),
+    body: z.string().min(1, 'Message is required'),
+    attachmentFileName: z.string().min(1).optional(),
+    attachmentContentBase64: z.string().min(1).optional(),
+    attachmentContentType: z.string().min(1).optional().default('application/pdf'),
+});
+
 export type CreateAPInvoiceDTO = z.infer<typeof createAPInvoiceSchema>;
 export type UpdateAPInvoiceDTO = z.infer<typeof updateAPInvoiceSchema>;
+export type SendAPInvoiceVendorMessageDTO = z.infer<typeof sendAPInvoiceVendorMessageSchema>;

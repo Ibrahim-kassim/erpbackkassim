@@ -6,7 +6,9 @@ import { PurchaseOrder, IPOLine, IPurchaseOrder, POBillingStatus, POReceiptStatu
 import { Quotation } from '../models/quotation.model';
 import { RFQ } from '../models/rfq.model';
 import { BusinessPartner } from '../models/businessPartner.model';
+import { SystemConfig } from '../models/systemConfig.model';
 import { getTenantBaseCurrency } from './systemConfig.defaults';
+import { sendConfiguredMail } from './mail.service';
 
 class ServiceError extends Error {
     constructor(message: string, public code: string) {
@@ -448,4 +450,73 @@ export async function softDelete(id: string, tenantId: string) {
 
     po.isDeleted = true;
     await po.save();
+}
+
+export async function sendVendorMessage(
+    id: string,
+    dto: {
+        subject: string;
+        body: string;
+        attachmentFileName?: string;
+        attachmentContentBase64?: string;
+        attachmentContentType?: string;
+    },
+    tenantId: string
+) {
+    const [po, config] = await Promise.all([
+        PurchaseOrder.findOne({ _id: id, ...tenantScope(tenantId), isDeleted: false }),
+        SystemConfig.findOne({ tenantId }),
+    ]);
+
+    if (!po) throw new ServiceError('Purchase Order not found', 'NOT_FOUND');
+    if (po.status !== 'APPROVED') {
+        throw new ServiceError('Only APPROVED purchase orders can be sent to vendors', 'INVALID_STATUS');
+    }
+    if (!config) {
+        throw new ServiceError('Complete company and email settings before sending purchase orders', 'VALIDATION');
+    }
+
+    const vendor = await BusinessPartner.findOne({
+        _id: po.vendorId,
+        tenantId,
+        isDeleted: false,
+    }).select('_id name email roles');
+
+    if (!vendor || !vendor.email) {
+        throw new ServiceError('Vendor email is missing. Add an email address to the vendor profile first.', 'VALIDATION');
+    }
+    if (!vendor.roles?.includes('VENDOR')) {
+        throw new ServiceError('Linked business partner is not configured as a vendor', 'VALIDATION');
+    }
+
+    const subjectWithToken = dto.subject.includes('ERP-PO:')
+        ? dto.subject
+        : `${dto.subject} [ERP-PO:${po.poNumber}]`;
+
+    const attachment =
+        dto.attachmentFileName && dto.attachmentContentBase64
+            ? {
+                filename: dto.attachmentFileName,
+                contentBase64: dto.attachmentContentBase64,
+                contentType: dto.attachmentContentType || 'application/pdf',
+            }
+            : undefined;
+
+    await sendConfiguredMail({
+        config,
+        to: vendor.email,
+        subject: subjectWithToken,
+        body: dto.body,
+        attachment,
+    });
+
+    return {
+        poId: po._id.toString(),
+        poNumber: po.poNumber,
+        vendorId: vendor._id.toString(),
+        vendorName: vendor.name,
+        vendorEmail: vendor.email,
+        subject: subjectWithToken,
+        sentAt: new Date().toISOString(),
+    };
 }
