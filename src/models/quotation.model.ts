@@ -12,6 +12,8 @@ export interface IQuotationAttachment {
     url: string; // public URL under /uploads
     contentType?: string;
     size?: number;
+    data?: Buffer;
+    storage?: 'db' | 'disk';
     uploadedAt: Date;
 }
 
@@ -52,6 +54,8 @@ const QuotationSchema: Schema = new Schema(
             url: { type: String, required: true },
             contentType: { type: String },
             size: { type: Number },
+            data: { type: Buffer },
+            storage: { type: String, enum: ['db', 'disk'], default: 'db' },
             uploadedAt: { type: Date, default: Date.now },
         }],
         isDeleted: { type: Boolean, default: false }

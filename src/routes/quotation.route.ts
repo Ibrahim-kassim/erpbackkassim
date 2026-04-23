@@ -1,26 +1,17 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import * as quotationController from '../controllers/quotation.controller';
 import { auth } from '../middleware/auth';
 
 const router = Router();
 router.use(auth);
 
-// Set up multer storage for vendor quotation attachments (PDF / Word / Excel)
-const uploadDir = path.join(process.cwd(), 'uploads', 'quotations');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadDir),
-    filename: (_req, file, cb) => {
-        const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-        cb(null, `${unique}${path.extname(file.originalname)}`);
-    },
-});
 const upload = multer({
-    storage,
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 20 * 1024 * 1024, // 20 MB per file
+    },
     fileFilter: (_req, file, cb) => {
         const allowedMimes = new Set([
             'application/pdf',
